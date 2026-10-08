@@ -1,0 +1,6 @@
+{
+  "name": "Micham Evlo",
+  "description": "Personal salary and daily expense tracking application with a funny Tamil personality",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

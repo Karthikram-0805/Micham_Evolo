@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Golden ₹ Coin peeking behind wallet top -->
+    <path
+        android:fillColor="#FFC107"
+        android:pathData="M54,24 A15,15 0 1,0 54,54 A15,15 0 1,0 54,24" />
+    <path
+        android:fillColor="#FFA000"
+        android:pathData="M54,26 A13,13 0 1,0 54,52 A13,13 0 1,0 54,26" />
+    <!-- Rupee symbol on coin -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.2"
+        android:pathData="M49,32 L58,32 M49,35 L57,35 M49,32 L49,44 M49,38 C54,38 56,36 56,34 M52,38 L58,45" />
+
+    <!-- Wallet Body (leather terracotta) -->
+    <path
+        android:fillColor="#E06D53"
+        android:pathData="M27,42 C27,39 29,37 32,37 L76,37 C79,37 81,39 81,42 L81,77 C81,81 78,84 74,84 L34,84 C30,84 27,81 27,77 Z" />
+
+    <!-- Wallet Pocket Stitching -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFAB91"
+        android:strokeWidth="1.2"
+        android:pathData="M30,44 L78,44 L78,76 C78,78 76,81 73,81 L35,81 C32,81 30,78 30,76 Z" />
+
+    <!-- Wallet Flap / Trim -->
+    <path
+        android:fillColor="#D8563A"
+        android:pathData="M27,42 C27,39 29,37 32,37 L76,37 C79,37 81,39 81,42 L81,50 C70,55 38,55 27,50 Z" />
+
+    <!-- Big Worried Cartoon Eyes -->
+    <!-- Left Eye white -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M43,56 A5,6 0 1,0 43,68 A5,6 0 1,0 43,56" />
+    <!-- Left Pupil looking nervous up/side -->
+    <path
+        android:fillColor="#1E293B"
+        android:pathData="M44,59 A2.5,3 0 1,0 44,65 A2.5,3 0 1,0 44,59" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M45,60 A0.8,0.8 0 1,0 45,61.6 A0.8,0.8 0 1,0 45,60" />
+
+    <!-- Right Eye white -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M65,56 A5,6 0 1,0 65,68 A5,6 0 1,0 65,56" />
+    <!-- Right Pupil looking nervous up/side -->
+    <path
+        android:fillColor="#1E293B"
+        android:pathData="M66,59 A2.5,3 0 1,0 66,65 A2.5,3 0 1,0 66,59" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M67,60 A0.8,0.8 0 1,0 67,61.6 A0.8,0.8 0 1,0 67,60" />
+
+    <!-- Worried Eyebrows angled up -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#6E2C1E"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:pathData="M38,54 C40,51 44,52 46,55" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#6E2C1E"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:pathData="M70,54 C68,51 64,52 62,55" />
+
+    <!-- Worried / Wavy shivering mouth -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#6E2C1E"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M47,73 Q50,70 54,73 T61,72" />
+
+    <!-- Big Cartoon Sweat Drop (blue teardrop on upper right temple) -->
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M75,46 C75,46 72,50 72,52 C72,54 73.5,56 75.5,56 C77.5,56 79,54 79,52 C79,50 75,46 75,46 Z" />
+    <path
+        android:fillColor="#BAE6FD"
+        android:pathData="M74,51 C73.5,52 73.5,53.5 74.5,54"
+        android:strokeColor="#BAE6FD"
+        android:strokeWidth="0.8"
+        android:strokeLineCap="round" />
+
+</vector>
