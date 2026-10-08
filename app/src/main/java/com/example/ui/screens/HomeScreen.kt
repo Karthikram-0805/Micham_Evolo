@@ -75,7 +75,8 @@ fun HomeScreen(
     onOpenAddIncome: () -> Unit,
     onOpenSearch: () -> Unit,
     onOpenSmsSync: () -> Unit,
-    onEditExpense: (ExpenseEntity) -> Unit
+    onEditExpense: (ExpenseEntity) -> Unit,
+    onOpenMonthlyTransactions: () -> Unit = {}
 ) {
     val summary by viewModel.financialSummary.collectAsState()
     val settings by viewModel.userSettings.collectAsState()
@@ -223,7 +224,8 @@ fun HomeScreen(
                     summary = summary,
                     currencySymbol = settings.currencySymbol,
                     userName = settings.userName,
-                    isRoastMode = settings.reactionIntensity == "ROAST"
+                    isRoastMode = settings.reactionIntensity == "ROAST",
+                    onOpenMonthlyTransactions = onOpenMonthlyTransactions
                 )
             }
 

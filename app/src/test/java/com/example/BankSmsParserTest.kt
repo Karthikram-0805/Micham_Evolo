@@ -123,4 +123,61 @@ class BankSmsParserTest {
         assertTrue("Transactions with different references must have different hashes",
             res1.transaction.uniqueHash != res2.transaction.uniqueHash)
     }
+
+    @Test
+    fun testHdfcSmartEmiPromotionalMessage1Ignored() {
+        val msg = "Convert Rs. 25366 on HDFC Bank Credit Card xx7609 to SmartEMI at rates from 0.99%. Limited period. https://1.hdfc.bank.in/HDFCBK/s/bZGvPY3b T&C"
+        val result = BankSmsParser.parse("VK-HDFCBK", msg)
+        assertTrue("Promotional SmartEMI message 1 must be ignored and not change wallet balance",
+            result is BankSmsParseResult.Ignored)
+    }
+
+    @Test
+    fun testHdfcSmartEmiPromotionalMessage2Ignored() {
+        val msg = "Convert recent HDFC Bank Credit Card x7378 spends of Rs.3066 into EMIs with SmartEMI. Don't miss it, click here: https://1.hdfc.bank.in/HDFCBK/s/AA11mLL5 T&C"
+        val result = BankSmsParser.parse("VK-HDFCBK", msg)
+        assertTrue("Promotional SmartEMI message 2 with 'spends' must be ignored and not change wallet balance",
+            result is BankSmsParseResult.Ignored)
+    }
+
+    @Test
+    fun testGenuineBankCredit5000() {
+        val msg = "Rs. 5,000 credited to A/c XX1234 on 08-10-26 by UPI. Avl Bal Rs. 15,000."
+        val result = BankSmsParser.parse("VK-HDFCBK", msg)
+        assertTrue(result is BankSmsParseResult.Success)
+        val tx = (result as BankSmsParseResult.Success).transaction
+        assertEquals(5000.0, tx.amount, 0.001)
+        assertEquals(TransactionType.CREDIT, tx.type)
+    }
+
+    @Test
+    fun testGenuineBankDebit2000() {
+        val msg = "Rs. 2,000 debited from A/c XX1234 on 08-10-26 via UPI to SWIGGY. Avl Bal Rs. 13,000."
+        val result = BankSmsParser.parse("VK-HDFCBK", msg)
+        assertTrue(result is BankSmsParseResult.Success)
+        val tx = (result as BankSmsParseResult.Success).transaction
+        assertEquals(2000.0, tx.amount, 0.001)
+        assertEquals(TransactionType.DEBIT, tx.type)
+    }
+
+    @Test
+    fun testActualEmiPaymentProcessedAsDebit() {
+        val msg = "Your EMI of Rs. 3,500 has been debited from A/c XX1234 for Loan. Avl Bal Rs. 10,000."
+        val result = BankSmsParser.parse("VK-HDFCBK", msg)
+        assertTrue(result is BankSmsParseResult.Success)
+        val tx = (result as BankSmsParseResult.Success).transaction
+        assertEquals(3500.0, tx.amount, 0.001)
+        assertEquals(TransactionType.DEBIT, tx.type)
+    }
+
+    @Test
+    fun testGenuineCreditCardPurchaseAlert() {
+        val msg = "Alert: Rs. 450 spent on HDFC Bank Credit Card ending 7609 at SWIGGY. Avl Limit Rs. 85,000."
+        val result = BankSmsParser.parse("VK-HDFCBK", msg)
+        assertTrue(result is BankSmsParseResult.Success)
+        val tx = (result as BankSmsParseResult.Success).transaction
+        assertEquals(450.0, tx.amount, 0.001)
+        assertEquals(TransactionType.DEBIT, tx.type)
+        assertEquals("Credit Card", tx.paymentMethod)
+    }
 }

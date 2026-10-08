@@ -24,15 +24,60 @@ object BankSmsParser {
 
     // Regex for LOANS, OFFERS, PROMOTIONS, PRE-APPROVED, ELIGIBILITY, EMI OFFERS
     private val PROMOTIONAL_LOAN_PATTERNS = listOf(
-        """(?i)\b(?:pre[\s-]?approved|eligible\s*for|eligibility|check\s*eligibility)\b""",
-        """(?i)\b(?:loan\s*offer|personal\s*loan|home\s*loan|car\s*loan|instant\s*loan|business\s*loan|gold\s*loan)\b""",
-        """(?i)\b(?:avail\s*loan|apply\s*now|claim\s*now|click\s*here\s*to\s*apply|disbursal\s*offer|loan\s*disbursement\s*ad)\b""",
-        """(?i)\b(?:credit\s*card\s*offer|credit\s*offer|credit\s*limit\s*(?:offer|increase|enhancement))\b""",
-        """(?i)\b(?:increase\s*your\s*limit|limit\s*enhancement|upgrade\s*your\s*card)\b""",
-        """(?i)\b(?:congratulations!?\s*you\s*are\s*eligible|you\s*are\s*eligible\s*for)\b""",
-        """(?i)\b(?:special\s*offer|exclusive\s*offer|discount\s*offer|promo\s*code|reward\s*points)\b""",
-        """(?i)\b(?:win\s*up\s*to|stand\s*a\s*chance|cashback\s*offer|earn\s*up\s*to)\b""",
-        """(?i)\b(?:emi\s*offer|convert\s*to\s*emi|avail\s*emi|easy\s*emi\s*option)\b"""
+        // SmartEMI and EMI Conversion offers
+        """(?i)\bsmart\s*emi\b""",
+        """(?i)\bconvert\b.*?\b(?:to|into)\b.*?\bemis?\b""",
+        """(?i)\bconvert\b.*?\bsmart\s*emi\b""",
+        """(?i)\bconvert\s+(?:rs\.?|inr|₹|[\d,]+|recent|spends|your).*?\bto\b""",
+        """(?i)\bconvert\s*(?:to|into)\s*emis?\b""",
+        """(?i)\bemi\s*offers?\b""",
+        """(?i)\beasy\s*emi\b""",
+        """(?i)\bavail\s*(?:easy\s*)?emi\b""",
+        """(?i)\bavail\s*smart\s*emi\b""",
+        """(?i)\blimited\s*period\b""",
+        """(?i)\blimited\s*period\s*offer\b""",
+        """(?i)\brates?\s*from\b""",
+        """(?i)\binterest\s*rates?\b""",
+        """(?i)\blow\s*interest\b""",
+        """(?i)\bcashback\s*offers?\b""",
+        """(?i)\bpre[\s-]?approved\b""",
+        """(?i)\beligible\s*for\b""",
+        """(?i)\beligibility\b""",
+        """(?i)\bcheck\s*eligibility\b""",
+        """(?i)\bloan\s*offer\b""",
+        """(?i)\bpersonal\s*loan\b""",
+        """(?i)\bhome\s*loan\b""",
+        """(?i)\bcar\s*loan\b""",
+        """(?i)\binstant\s*loan\b""",
+        """(?i)\bbusiness\s*loan\b""",
+        """(?i)\bgold\s*loan\b""",
+        """(?i)\bavail\s*loan\b""",
+        """(?i)\bapply\s*now\b""",
+        """(?i)\bclaim\s*now\b""",
+        """(?i)\bclick\s*here\b""",
+        """(?i)\bclick\s*to\b""",
+        """(?i)\btap\s*here\b""",
+        """(?i)\bt&c\b""",
+        """(?i)\btnc\b""",
+        """(?i)\bterms\s*(&|and)\s*conditions\b""",
+        """(?i)\bdon'?t\s*miss\b""",
+        """(?i)\bcredit\s*card\s*offer\b""",
+        """(?i)\bcredit\s*offer\b""",
+        """(?i)\bcredit\s*limit\s*(?:offer|increase|enhancement)\b""",
+        """(?i)\bincrease\s*your\s*limit\b""",
+        """(?i)\blimit\s*enhancement\b""",
+        """(?i)\bupgrade\s*your\s*card\b""",
+        """(?i)\bcongratulations!?\s*you\s*are\s*eligible\b""",
+        """(?i)\byou\s*are\s*eligible\s*for\b""",
+        """(?i)\bspecial\s*offer\b""",
+        """(?i)\bexclusive\s*offer\b""",
+        """(?i)\bdiscount\s*offer\b""",
+        """(?i)\bpromo\s*code\b""",
+        """(?i)\breward\s*points\b""",
+        """(?i)\bvoucher\b""",
+        """(?i)\bwin\s*up\s*to\b""",
+        """(?i)\bstand\s*a\s*chance\b""",
+        """(?i)\bearn\s*up\s*to\b"""
     )
 
     // Regex for Reminders, Bills, Mandates without transaction
@@ -54,13 +99,15 @@ object BankSmsParser {
         """(?i)^(?:.*)(?:avl|available|clear)?\s*bal(?:ance)?\s*(?:in|for)?\s*(?:a/c|account).*(?:is|:)\s*(?:rs\.?|inr|₹)?\s*[\d,]+(?:\.\d{1,2})?(?:[^\w]*)$"""
     )
 
-    // Transaction verbs
+    // Completed Transaction verbs
+    // Note: 'spends' or 'credit card' alone are NOT treated as transaction verbs!
     private val DEBIT_VERB_REGEX = Pattern.compile(
-        """(?i)\b(?:debited|debit|debited\s*by|debited\s*with|debited\s*for|dr\s*to|spent|paid|withdrawn|withdrew|transferred\s*to|sent\s*to|purchase\s*at|purchase\s*of|charged\s*to)\b"""
+        """(?i)\b(?:debited|debited\s+by|debited\s+with|debited\s+for|has\s+been\s+debited|was\s+debited|is\s+debited|dr\s+to|dr\s+from|paid\s+to|paid\s+for|paid\s+rs|paid\s+inr|paid\s+₹|paid|withdrawn|withdrew|transferred\s+to|sent\s+to|purchase\s+at|purchase\s+of|purchase\s+done|charged\s+to|spent\s+(?:rs\.?|inr|₹|[\d,]+)|spent\s+on|you\s+have\s+spent|spent)\b"""
     )
 
+    // Completed Credit verbs - strictly excludes "credit card"
     private val CREDIT_VERB_REGEX = Pattern.compile(
-        """(?i)\b(?:credited|credit|credited\s*with|credited\s*by|credited\s*to|cr\s*to|deposited|received|refunded|refund\s*of|transferred\s*into|added\s*to)\b"""
+        """(?i)\b(?:credited|credited\s+with|credited\s+by|credited\s+to|cr\s+to|cr\s+in|has\s+been\s+credited|was\s+credited|is\s+credited|salary\s+credited|deposited|received|refunded|refund\s+of|transferred\s+into|added\s+to|credit\s+(?:of|amount|to|with|by))\b"""
     )
 
     // Currency Amount Patterns

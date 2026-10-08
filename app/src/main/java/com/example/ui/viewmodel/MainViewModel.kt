@@ -43,6 +43,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
+import java.math.BigDecimal
+import java.math.RoundingMode
 import java.time.YearMonth
 import java.time.ZoneId
 
@@ -138,17 +140,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         // Find salary for this cycle month/year, fallback to defaultSalary
         val salaryRecord = salaries.find { it.month == cycle.cycleMonth && it.year == cycle.cycleYear }
-        val salaryAmount = salaryRecord?.salaryAmount ?: settings.defaultSalary
+        val salaryAmount = BigDecimal(salaryRecord?.salaryAmount ?: settings.defaultSalary).setScale(2, RoundingMode.HALF_UP).toDouble()
 
-        // Incomes in this cycle
+        // Incomes in this cycle (Bank credits + manual incomes)
         val cycleIncomes = incomes.filter { it.date >= cycle.startDate && it.date <= cycle.endDate }
-        val totalAdditionalIncome = cycleIncomes.sumOf { it.amount }
-        val totalAvailable = salaryAmount + totalAdditionalIncome
+        val totalAdditionalIncome = BigDecimal(cycleIncomes.sumOf { it.amount }).setScale(2, RoundingMode.HALF_UP).toDouble()
+        val totalAvailable = BigDecimal(salaryAmount + totalAdditionalIncome).setScale(2, RoundingMode.HALF_UP).toDouble()
 
-        // Expenses in this cycle
+        // Expenses in this cycle (Bank debits + manual expenses)
         val cycleExpenses = expenses.filter { it.date >= cycle.startDate && it.date <= cycle.endDate }
-        val totalExpenses = cycleExpenses.sumOf { it.amount }
-        val remaining = totalAvailable - totalExpenses
+        val totalExpenses = BigDecimal(cycleExpenses.sumOf { it.amount }).setScale(2, RoundingMode.HALF_UP).toDouble()
+        val remaining = BigDecimal(totalAvailable - totalExpenses).setScale(2, RoundingMode.HALF_UP).toDouble()
 
         val percentRemaining = if (totalAvailable > 0) {
             ((remaining / totalAvailable) * 100).toInt().coerceIn(0, 100)
@@ -396,6 +398,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteExpense(id: Long) {
         viewModelScope.launch(Dispatchers.IO) {
+            // Keep persistent record of the processed SMS hash if originated from SMS so it is NEVER re-imported
+            database.processedSmsDao().markAsDeleted(id, "DEBIT")
             repository.deleteExpenseById(id)
         }
     }
@@ -428,6 +432,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteIncome(id: Long) {
         viewModelScope.launch(Dispatchers.IO) {
+            // Keep persistent record of the processed SMS hash if originated from SMS so it is NEVER re-imported
+            database.processedSmsDao().markAsDeleted(id, "CREDIT")
             repository.deleteIncomeById(id)
         }
     }
@@ -617,7 +623,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteProcessedSms(hash: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            database.processedSmsDao().deleteByHash(hash)
+            database.processedSmsDao().markHashAsDeleted(hash)
         }
     }
 

@@ -15,6 +15,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Warning
@@ -51,6 +54,7 @@ fun MainBalanceCard(
     currencySymbol: String,
     userName: String,
     isRoastMode: Boolean,
+    onOpenMonthlyTransactions: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val progressTarget = if (summary.totalAvailable > 0) {
@@ -107,13 +111,16 @@ fun MainBalanceCard(
             }
         }
 
-        // Hero Balance Card
+        // Hero Balance Card - Clickable to open full monthly transaction history
         Card(
             shape = RoundedCornerShape(24.dp),
             elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("main_balance_card")
+                .clickable(enabled = onOpenMonthlyTransactions != null) {
+                    onOpenMonthlyTransactions?.invoke()
+                }
         ) {
             Box(
                 modifier = Modifier
@@ -135,13 +142,24 @@ fun MainBalanceCard(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "MICHAM EVLO? (Remaining)",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                            letterSpacing = 1.sp
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "MICHAM EVLO? (Remaining)",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                letterSpacing = 1.sp
+                            )
+                            if (onOpenMonthlyTransactions != null) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                    contentDescription = "View Monthly Transactions",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
 
                         // Percentage remaining pill
                         val badgeColor = when {
@@ -173,6 +191,16 @@ fun MainBalanceCard(
                         fontWeight = FontWeight.Black,
                         color = if (summary.remainingBalance < 0) SpentRed else MaterialTheme.colorScheme.onSurface
                     )
+
+                    if (onOpenMonthlyTransactions != null) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Tap to view monthly transaction ledger 📜",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
 
                     Spacer(modifier = Modifier.height(14.dp))
 

@@ -31,6 +31,12 @@ interface ProcessedSmsDao {
     @Query("SELECT * FROM processed_sms ORDER BY timestamp DESC LIMIT 50")
     suspend fun getRecentProcessedSms(): List<ProcessedSmsEntity>
 
+    @Query("UPDATE processed_sms SET status = 'DELETED' WHERE associatedId = :associatedId AND transactionType = :type")
+    suspend fun markAsDeleted(associatedId: Long, type: String): Int
+
+    @Query("UPDATE processed_sms SET status = 'DELETED' WHERE smsHash = :smsHash")
+    suspend fun markHashAsDeleted(smsHash: String): Int
+
     @Query("DELETE FROM processed_sms WHERE smsHash = :smsHash")
     suspend fun deleteByHash(smsHash: String)
 
