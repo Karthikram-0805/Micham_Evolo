@@ -103,6 +103,8 @@ fun DetectedSmsReviewDialog(
         )
     }
 
+    var isSaving by remember(currentItem.uniqueHash) { mutableStateOf(false) }
+
     var categoryDropdownExpanded by remember { mutableStateOf(false) }
 
     val quickDescriptionChips = if (currentItem.type == TransactionType.DEBIT) {
@@ -308,7 +310,10 @@ fun DetectedSmsReviewDialog(
         },
         confirmButton = {
             Button(
+                enabled = !isSaving,
                 onClick = {
+                    if (isSaving) return@Button
+                    isSaving = true
                     val finalDesc = descriptionInput.trim().ifEmpty {
                         selectedCategory?.name ?: if (currentItem.type == TransactionType.DEBIT) "Food" else "Salary"
                     }
@@ -326,8 +331,10 @@ fun DetectedSmsReviewDialog(
                 Icon(Icons.Default.Done, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = if (currentItem.type == TransactionType.DEBIT) {
-                        "Deduct ₹${currentItem.amount.toLong()}"
+                    text = if (isSaving) {
+                        "Saving..."
+                    } else if (currentItem.type == TransactionType.DEBIT) {
+                        "Confirm Category (₹${currentItem.amount.toLong()})"
                     } else {
                         "Add ₹${currentItem.amount.toLong()}"
                     }

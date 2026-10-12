@@ -70,8 +70,8 @@ object BankSmsProcessor {
         val db = AppDatabase.getDatabase(context, CoroutineScope(Dispatchers.IO))
         val processedDao = db.processedSmsDao()
 
-        val existingCount = processedDao.countByHash(transaction.uniqueHash)
-        if (existingCount > 0) {
+        val existing = processedDao.getProcessedByHashOrRef(transaction.uniqueHash, "", transaction.referenceId)
+        if (existing != null) {
             return@withContext BankSmsProcessResult.Duplicate(
                 "Duplicate skipped: ${transaction.bankName} ₹${transaction.amount} on ${transaction.date}"
             )
@@ -82,24 +82,7 @@ object BankSmsProcessor {
             val categories = db.categoryDao().getAllCategoriesSnapshot()
             val categoryId = matchCategoryForTransaction(transaction, categories)
 
-            val note = buildString {
-                append("Bank SMS: ")
-                append(transaction.bankName)
-                append(" (")
-                append(transaction.accountInfo)
-                append(")")
-                if (transaction.payeeOrMerchant.isNotBlank() &&
-                    transaction.payeeOrMerchant != "Merchant / Payee"
-                ) {
-                    append(" - ")
-                    append(transaction.payeeOrMerchant)
-                }
-                if (transaction.referenceId.isNotBlank()) {
-                    append(" [Ref: ")
-                    append(transaction.referenceId)
-                    append("]")
-                }
-            }
+            val note = buildNote(transaction)
 
             val expenseDate = if (transaction.date.isNotBlank() && transaction.date >= "2026-01-01") {
                 transaction.date
@@ -119,7 +102,7 @@ object BankSmsProcessor {
 
             val expenseId = db.expenseDao().insertExpense(expense)
 
-            // Save in processed_sms to prevent future duplicates
+            // Save in processed_sms with status PENDING_REVIEW so category popup can review this single transaction
             val processedRecord = ProcessedSmsEntity(
                 smsHash = transaction.uniqueHash,
                 sender = transaction.rawSender,
@@ -133,6 +116,7 @@ object BankSmsProcessor {
                 time = expenseTime,
                 referenceId = transaction.referenceId,
                 associatedId = expenseId,
+                status = "PENDING_REVIEW",
                 timestamp = System.currentTimeMillis()
             )
             processedDao.insert(processedRecord)
@@ -304,5 +288,27 @@ object BankSmsProcessor {
         return categories.find { it.name.equals("Other", ignoreCase = true) }?.id
             ?: categories.firstOrNull()?.id
             ?: 1L
+    }
+
+    fun buildNote(transaction: ParsedBankTransaction): String {
+        return buildString {
+            append("Bank SMS: ")
+            append(transaction.bankName)
+            append(" (")
+            append(transaction.accountInfo)
+            append(")")
+            if (transaction.payeeOrMerchant.isNotBlank() &&
+                transaction.payeeOrMerchant != "Merchant / Payee" &&
+                transaction.payeeOrMerchant != "Sender / Source"
+            ) {
+                append(" - ")
+                append(transaction.payeeOrMerchant)
+            }
+            if (transaction.referenceId.isNotBlank()) {
+                append(" [Ref: ")
+                append(transaction.referenceId)
+                append("]")
+            }
+        }
     }
 }

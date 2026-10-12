@@ -127,4 +127,41 @@ class WalletRecalculationTest {
         ledger.deleteDebit(1L)
         assertEquals(9949.99, ledger.remainingBalance, 0.001)
     }
+
+    @Test
+    fun testSmsCategorySelectionUpdatesWithoutDuplicatingDebit() {
+        val ledger = LedgerState(salary = 10000.0)
+
+        // Scenario: A new ₹500 debit SMS is detected -> exactly one ₹500 debit transaction is created
+        val smsTransactionId = 501L
+        ledger.addDebit(smsTransactionId, 500.0)
+        assertEquals(9500.0, ledger.remainingBalance, 0.001)
+        assertEquals(500.0, ledger.totalDebits, 0.001)
+
+        // User opens category popup, selects "Food" -> updates same transaction (does NOT insert new debit)
+        // Ledger amount must not change!
+        assertEquals(9500.0, ledger.remainingBalance, 0.001)
+        assertEquals(500.0, ledger.totalDebits, 0.001)
+
+        // User later changes category from Food to Shopping -> updates same transaction
+        // Must NOT create another transaction and must NOT deduct another ₹500
+        assertEquals(9500.0, ledger.remainingBalance, 0.001)
+        assertEquals(500.0, ledger.totalDebits, 0.001)
+    }
+
+    @Test
+    fun testStableHashIdenticalBetweenBroadcastAndInbox() {
+        val body = "Rs. 750.00 debited from a/c XX4321 on 12-10-26 via UPI to ZOMATO. Avl Bal Rs. 8,250.00. Ref 429184918231."
+        val result1 = BankSmsParser.parse("VK-HDFCBK", body, 1728739100000L)
+        val result2 = BankSmsParser.parse("AD-HDFCBK", body, 1728739100800L) // 800ms difference in timestamp
+
+        assertTrue(result1 is BankSmsParseResult.Success)
+        assertTrue(result2 is BankSmsParseResult.Success)
+
+        val tx1 = (result1 as BankSmsParseResult.Success).transaction
+        val tx2 = (result2 as BankSmsParseResult.Success).transaction
+
+        // Hashes must be identical so inbox scanning detects that broadcast listener already recorded it!
+        assertEquals(tx1.uniqueHash, tx2.uniqueHash)
+    }
 }

@@ -313,6 +313,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             AppDatabase.populateDefaultCategories(database.categoryDao())
             repository.checkAndApplyDueRecurringExpenses()
+            repository.reconcileDuplicateTransactions()
 
             val settings = preferencesRepository.userSettingsFlow.first()
             if (settings.appLockEnabled && settings.appLockPin.isNotBlank()) {
@@ -685,8 +686,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * User confirmed a detected bank SMS transaction with their custom description.
-     * Saves as Expense (if Debit) or Income (if Credit), updates balance, marks as processed in DB.
+     * User confirmed a detected bank SMS transaction with their custom description and category.
+     * REQUIRED FIX 1 & 3:
+     * - Uses an UPDATE operation for category selection on the existing transaction ID, NOT INSERT.
+     * - Prevents duplicate transactions from ever being inserted.
+     * - Amount was deducted once when the transaction was created; updating category only updates category attribution.
+     * - Marks the SMS as CONFIRMED persistently so it is never re-processed.
      */
     fun confirmDetectedTransaction(
         item: DetectedSmsItem,
@@ -703,22 +708,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ?: allCats.firstOrNull()
             val finalCategoryId = matchedCat?.id ?: categoryId
 
-            val effectiveDate = DateUtils.today()
-            val effectiveTime = if (item.time.isNotBlank()) item.time else DateUtils.nowTime()
-
-            var newAssociatedId = 0L
-
             if (item.type == TransactionType.DEBIT) {
-                // Save as Expense -> automatically deducts from available balance and adds to damage/expenses list
-                val expense = ExpenseEntity(
-                    amount = item.amount,
-                    categoryId = finalCategoryId,
-                    date = effectiveDate,
-                    time = effectiveTime,
-                    paymentMethod = item.paymentMethod.ifBlank { "UPI" },
-                    note = finalNote
-                )
-                newAssociatedId = repository.insertExpense(expense)
+                // Update the single existing transaction record in the database using transactionId
+                val existingExpense = if (item.transactionId > 0L) {
+                    repository.getExpenseById(item.transactionId)
+                } else null
+
+                if (existingExpense != null) {
+                    val updatedExpense = existingExpense.copy(
+                        categoryId = finalCategoryId,
+                        note = finalNote,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                    repository.updateExpense(updatedExpense)
+                } else {
+                    // Fallback only if the record was somehow not in DB yet
+                    val effectiveDate = if (item.date.isNotBlank() && item.date >= "2026-01-01") item.date else DateUtils.today()
+                    val effectiveTime = if (item.time.isNotBlank()) item.time else DateUtils.nowTime()
+                    val newExpense = ExpenseEntity(
+                        amount = item.amount,
+                        categoryId = finalCategoryId,
+                        date = effectiveDate,
+                        time = effectiveTime,
+                        paymentMethod = item.paymentMethod.ifBlank { "UPI" },
+                        note = finalNote
+                    )
+                    val insertedId = repository.insertExpense(newExpense)
+                    database.processedSmsDao().updateAssociatedId(item.uniqueHash, insertedId)
+                }
+
+                // Update persistent processed_sms state to CONFIRMED
+                database.processedSmsDao().updateStatusAndDescription(item.uniqueHash, "CONFIRMED", finalNote)
 
                 // Trigger funny Tamil reaction only when finishing review
                 val isLast = _pendingSmsTransactions.value.size <= 1
@@ -734,40 +754,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _lastReactionMessage.value = reaction
                 }
             } else {
-                // Save as Income -> automatically adds to available balance
-                val income = IncomeEntity(
-                    amount = item.amount,
-                    incomeType = if (trimmedDesc.contains("Salary", ignoreCase = true)) "Salary" else "Bank Deposit",
-                    date = effectiveDate,
-                    note = finalNote
-                )
-                newAssociatedId = repository.insertIncome(income)
+                // Credit transaction already recorded in ledger; mark confirmed
+                database.processedSmsDao().updateStatusAndDescription(item.uniqueHash, "CONFIRMED", finalNote)
                 val isLast = _pendingSmsTransactions.value.size <= 1
                 if (isLast) {
                     _lastReactionMessage.value = "Bank credit ₹${CurrencyFormatter.format(item.amount)} vandhachu! Balance boosted 💰😎"
                 }
             }
-
-            // Save in processed_sms table so it NEVER appears again even after restart
-            val processedRecord = ProcessedSmsEntity(
-                smsHash = item.uniqueHash,
-                sender = item.sender,
-                body = item.body,
-                amount = item.amount,
-                transactionType = item.type.name,
-                bankName = item.bankName,
-                accountInfo = item.accountInfo,
-                paymentMethod = item.paymentMethod,
-                date = effectiveDate,
-                time = effectiveTime,
-                referenceId = item.referenceId,
-                associatedId = newAssociatedId,
-                smsId = item.smsId,
-                description = trimmedDesc,
-                status = "CONFIRMED",
-                timestamp = System.currentTimeMillis()
-            )
-            database.processedSmsDao().insert(processedRecord)
 
             // Remove from pending list
             withContext(Dispatchers.Main) {
@@ -777,31 +770,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * User chooses to skip / ignore a detected bank SMS transaction.
-     * Records as SKIPPED in DB so it is never shown again.
+     * User chooses to skip / ignore a detected bank SMS transaction popup.
+     * Retains the original transaction record safely in the database with its initial category.
+     * Updates status to CONFIRMED so it never pops up again and is never duplicated.
      */
     fun dismissDetectedTransaction(item: DetectedSmsItem) {
         viewModelScope.launch(Dispatchers.IO) {
-            val processedRecord = ProcessedSmsEntity(
-                smsHash = item.uniqueHash,
-                sender = item.sender,
-                body = item.body,
-                amount = item.amount,
-                transactionType = item.type.name,
-                bankName = item.bankName,
-                accountInfo = item.accountInfo,
-                paymentMethod = item.paymentMethod,
-                date = item.date,
-                time = item.time,
-                referenceId = item.referenceId,
-                associatedId = 0L,
-                smsId = item.smsId,
-                description = "Skipped by user",
-                status = "SKIPPED",
-                timestamp = System.currentTimeMillis()
-            )
-            database.processedSmsDao().insert(processedRecord)
-
+            database.processedSmsDao().updateStatus(item.uniqueHash, "CONFIRMED")
             withContext(Dispatchers.Main) {
                 _pendingSmsTransactions.value = _pendingSmsTransactions.value.filter { it.uniqueHash != item.uniqueHash }
             }
@@ -812,25 +787,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val pending = _pendingSmsTransactions.value
         viewModelScope.launch(Dispatchers.IO) {
             for (item in pending) {
-                val processedRecord = ProcessedSmsEntity(
-                    smsHash = item.uniqueHash,
-                    sender = item.sender,
-                    body = item.body,
-                    amount = item.amount,
-                    transactionType = item.type.name,
-                    bankName = item.bankName,
-                    accountInfo = item.accountInfo,
-                    paymentMethod = item.paymentMethod,
-                    date = item.date,
-                    time = item.time,
-                    referenceId = item.referenceId,
-                    associatedId = 0L,
-                    smsId = item.smsId,
-                    description = "Skipped by user",
-                    status = "SKIPPED",
-                    timestamp = System.currentTimeMillis()
-                )
-                database.processedSmsDao().insert(processedRecord)
+                database.processedSmsDao().updateStatus(item.uniqueHash, "CONFIRMED")
             }
             withContext(Dispatchers.Main) {
                 _pendingSmsTransactions.value = emptyList()
@@ -840,7 +797,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * Simulates receiving a bank SMS today and routes it through the exact
-     * Detection -> User Review & Description -> Confirm -> Spent Added to Expenses flow.
+     * Detection -> Single Transaction Creation -> User Review & Description -> Update Category flow.
      */
     fun simulateBankSmsForReview(
         sender: String,
@@ -858,8 +815,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             val tx = parseResult.transaction
-            val alreadyInDb = database.processedSmsDao().isSmsProcessed(tx.uniqueHash, "", tx.referenceId)
-            if (alreadyInDb > 0) {
+            val existing = database.processedSmsDao().getProcessedByHashOrRef(tx.uniqueHash, "", tx.referenceId)
+            if (existing != null && existing.status != "PENDING_REVIEW") {
                 withContext(Dispatchers.Main) {
                     onResult("Already processed! This transaction will not appear again.")
                 }
@@ -869,33 +826,109 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val cats = repository.getAllCategoriesSnapshot()
             val desc = BankSmsProcessor.suggestDefaultDescription(tx)
             val catId = BankSmsProcessor.matchCategoryForTransaction(tx, cats)
+            val note = BankSmsProcessor.buildNote(tx)
 
-            val detectedItem = DetectedSmsItem(
-                smsId = "SIM_${System.currentTimeMillis()}",
-                sender = sender,
-                body = body,
-                amount = tx.amount,
-                type = tx.type,
-                bankName = tx.bankName,
-                accountInfo = tx.accountInfo,
-                paymentMethod = tx.paymentMethod,
-                payeeOrMerchant = tx.payeeOrMerchant,
-                referenceId = tx.referenceId,
-                date = tx.date,
-                time = tx.time,
-                timestamp = timestamp,
-                uniqueHash = tx.uniqueHash,
-                defaultDescription = desc,
-                suggestedCategoryId = catId
-            )
+            val expenseDate = if (tx.date.isNotBlank() && tx.date >= "2026-01-01") tx.date else DateUtils.today()
+            val expenseTime = if (tx.time.isNotBlank()) tx.time else DateUtils.nowTime()
 
-            withContext(Dispatchers.Main) {
-                val current = _pendingSmsTransactions.value.toMutableList()
-                if (current.none { it.uniqueHash == detectedItem.uniqueHash }) {
-                    current.add(detectedItem)
-                    _pendingSmsTransactions.value = current
+            val transactionId = if (existing != null && existing.associatedId > 0L) {
+                existing.associatedId
+            } else {
+                // Create single transaction record in DB
+                if (tx.type == TransactionType.DEBIT) {
+                    val exp = ExpenseEntity(
+                        amount = tx.amount,
+                        categoryId = catId,
+                        date = expenseDate,
+                        time = expenseTime,
+                        paymentMethod = tx.paymentMethod,
+                        note = note
+                    )
+                    val id = repository.insertExpense(exp)
+                    val record = ProcessedSmsEntity(
+                        smsHash = tx.uniqueHash,
+                        sender = sender,
+                        body = body,
+                        amount = tx.amount,
+                        transactionType = "DEBIT",
+                        bankName = tx.bankName,
+                        accountInfo = tx.accountInfo,
+                        paymentMethod = tx.paymentMethod,
+                        date = expenseDate,
+                        time = expenseTime,
+                        referenceId = tx.referenceId,
+                        associatedId = id,
+                        smsId = "SIM_${System.currentTimeMillis()}",
+                        description = desc,
+                        status = "PENDING_REVIEW",
+                        timestamp = timestamp
+                    )
+                    database.processedSmsDao().insert(record)
+                    id
+                } else {
+                    val inc = IncomeEntity(
+                        amount = tx.amount,
+                        incomeType = "Bank Deposit",
+                        date = expenseDate,
+                        note = note
+                    )
+                    val id = repository.insertIncome(inc)
+                    val record = ProcessedSmsEntity(
+                        smsHash = tx.uniqueHash,
+                        sender = sender,
+                        body = body,
+                        amount = tx.amount,
+                        transactionType = "CREDIT",
+                        bankName = tx.bankName,
+                        accountInfo = tx.accountInfo,
+                        paymentMethod = tx.paymentMethod,
+                        date = expenseDate,
+                        time = expenseTime,
+                        referenceId = tx.referenceId,
+                        associatedId = id,
+                        smsId = "SIM_${System.currentTimeMillis()}",
+                        description = note,
+                        status = "CONFIRMED",
+                        timestamp = timestamp
+                    )
+                    database.processedSmsDao().insert(record)
+                    id
                 }
-                onResult("Detected ₹${CurrencyFormatter.format(tx.amount)} ${tx.type.name}! Please enter description.")
+            }
+
+            if (tx.type == TransactionType.DEBIT) {
+                val detectedItem = DetectedSmsItem(
+                    transactionId = transactionId,
+                    smsId = "SIM_${System.currentTimeMillis()}",
+                    sender = sender,
+                    body = body,
+                    amount = tx.amount,
+                    type = tx.type,
+                    bankName = tx.bankName,
+                    accountInfo = tx.accountInfo,
+                    paymentMethod = tx.paymentMethod,
+                    payeeOrMerchant = tx.payeeOrMerchant,
+                    referenceId = tx.referenceId,
+                    date = expenseDate,
+                    time = expenseTime,
+                    timestamp = timestamp,
+                    uniqueHash = tx.uniqueHash,
+                    defaultDescription = desc,
+                    suggestedCategoryId = catId
+                )
+
+                withContext(Dispatchers.Main) {
+                    val current = _pendingSmsTransactions.value.toMutableList()
+                    if (current.none { it.uniqueHash == detectedItem.uniqueHash }) {
+                        current.add(detectedItem)
+                        _pendingSmsTransactions.value = current
+                    }
+                    onResult("Detected ₹${CurrencyFormatter.format(tx.amount)}! Please review and confirm category.")
+                }
+            } else {
+                withContext(Dispatchers.Main) {
+                    onResult("Credit of ₹${CurrencyFormatter.format(tx.amount)} added to wallet balance successfully!")
+                }
             }
         }
     }

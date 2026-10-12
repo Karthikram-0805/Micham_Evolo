@@ -34,11 +34,48 @@ class ExpenseRepository(
 
     suspend fun insertExpense(expense: ExpenseEntity): Long = expenseDao.insertExpense(expense)
 
+    suspend fun getExpenseById(id: Long): ExpenseEntity? = expenseDao.getExpenseById(id)
+
     suspend fun updateExpense(expense: ExpenseEntity) = expenseDao.updateExpense(expense)
 
     suspend fun deleteExpense(expense: ExpenseEntity) = expenseDao.deleteExpense(expense)
 
     suspend fun deleteExpenseById(id: Long) = expenseDao.deleteExpenseById(id)
+
+    suspend fun reconcileDuplicateTransactions(): Int {
+        var duplicatesRemoved = 0
+        try {
+            val allExpenses = expenseDao.getAllExpensesSnapshot()
+            val groupedExpenses = allExpenses.groupBy { 
+                "${it.amount}_${it.date}_${it.paymentMethod}_${it.note.trim()}" 
+            }
+            groupedExpenses.forEach { (_, group) ->
+                if (group.size > 1) {
+                    // Keep the first (original) record, delete subsequent exact duplicates
+                    group.drop(1).forEach { duplicate ->
+                        expenseDao.deleteExpenseById(duplicate.id)
+                        duplicatesRemoved++
+                    }
+                }
+            }
+
+            val allIncomes = incomeDao.getAllIncomesSnapshot()
+            val groupedIncomes = allIncomes.groupBy {
+                "${it.amount}_${it.date}_${it.incomeType}_${it.note.trim()}"
+            }
+            groupedIncomes.forEach { (_, group) ->
+                if (group.size > 1) {
+                    group.drop(1).forEach { duplicate ->
+                        incomeDao.deleteIncomeById(duplicate.id)
+                        duplicatesRemoved++
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return duplicatesRemoved
+    }
 
     // Salaries
     fun getSalary(month: Int, year: Int): Flow<SalaryEntity?> = salaryDao.getSalary(month, year)

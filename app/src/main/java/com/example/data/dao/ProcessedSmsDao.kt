@@ -40,6 +40,27 @@ interface ProcessedSmsDao {
     @Query("DELETE FROM processed_sms WHERE smsHash = :smsHash")
     suspend fun deleteByHash(smsHash: String)
 
+    @Query("SELECT * FROM processed_sms WHERE smsHash = :smsHash OR (smsId != '' AND smsId = :smsId) OR (referenceId != '' AND referenceId = :referenceId) LIMIT 1")
+    suspend fun getProcessedByHashOrRef(smsHash: String, smsId: String, referenceId: String): ProcessedSmsEntity?
+
+    @Query("SELECT * FROM processed_sms WHERE smsHash = :smsHash LIMIT 1")
+    suspend fun getProcessedByHash(smsHash: String): ProcessedSmsEntity?
+
+    @Query("SELECT * FROM processed_sms WHERE associatedId = :associatedId LIMIT 1")
+    suspend fun getByAssociatedId(associatedId: Long): ProcessedSmsEntity?
+
+    @Query("SELECT * FROM processed_sms WHERE status = 'PENDING_REVIEW' ORDER BY timestamp DESC")
+    suspend fun getPendingReviewSms(): List<ProcessedSmsEntity>
+
+    @Query("UPDATE processed_sms SET status = :status, description = :description WHERE smsHash = :smsHash")
+    suspend fun updateStatusAndDescription(smsHash: String, status: String, description: String): Int
+
+    @Query("UPDATE processed_sms SET status = :status WHERE smsHash = :smsHash")
+    suspend fun updateStatus(smsHash: String, status: String): Int
+
+    @Query("UPDATE processed_sms SET associatedId = :associatedId WHERE smsHash = :smsHash")
+    suspend fun updateAssociatedId(smsHash: String, associatedId: Long): Int
+
     @Query("DELETE FROM processed_sms")
     suspend fun clearAll()
 }

@@ -470,12 +470,16 @@ object BankSmsParser {
     ): String {
         // If reference ID exists, it's globally unique!
         val rawKey = if (referenceId.isNotBlank()) {
-            "REF_${type.name}_${referenceId.lowercase(Locale.ENGLISH)}"
+            "REF_${type.name}_${referenceId.lowercase(Locale.ENGLISH).trim()}"
         } else {
-            // Fingerprint from sender, amount, type, account, date, time, and core text
-            // Including time ensures two separate transactions of the same amount are treated as distinct
-            val normalizedBody = body.lowercase(Locale.ENGLISH).replace(Regex("""\s+"""), " ")
-            "FP_${sender}_${type.name}_${amount}_${accountInfo}_${date}_${time}_${timestampMillis}_${normalizedBody.hashCode()}"
+            // Stable fingerprint: normalized sender, transaction type, amount, account, date, time (HH:mm), and body content
+            val cleanSender = sender.replace(Regex("""^[A-Za-z]{2}-"""), "").uppercase(Locale.ENGLISH).trim()
+            val cleanAccount = accountInfo.replace(Regex("""[^\w]"""), "").uppercase(Locale.ENGLISH)
+            val normalizedBody = body.lowercase(Locale.ENGLISH)
+                .replace(BALANCE_CLAUSE_REGEX.toRegex(), "")
+                .replace(Regex("""\s+"""), " ")
+                .trim()
+            "FP_${cleanSender}_${type.name}_${amount}_${cleanAccount}_${date}_${time}_${normalizedBody.hashCode()}"
         }
 
         val md = MessageDigest.getInstance("SHA-256")
