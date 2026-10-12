@@ -44,6 +44,7 @@ import com.example.domain.model.DailySpendItem
 import com.example.ui.components.CategoryDonutChart
 import com.example.ui.components.CategoryIconHelper
 import com.example.ui.components.DailyExpenseBarChart
+import com.example.ui.components.InteractiveFinancialAnalyticsSection
 import com.example.ui.components.SalaryVsExpenseComparison
 import com.example.ui.theme.IncomeGreen
 import com.example.ui.theme.MichamGreenPrimary
@@ -59,6 +60,9 @@ fun AnalyticsScreen(viewModel: MainViewModel) {
     val summary by viewModel.financialSummary.collectAsState()
     val categorySpendList by viewModel.categorySpendList.collectAsState()
     val allExpenses by viewModel.allExpenses.collectAsState()
+    val allIncomes by viewModel.allIncomes.collectAsState()
+    val allSalaries by viewModel.allSalaries.collectAsState()
+    val categories by viewModel.categories.collectAsState()
     val settings by viewModel.userSettings.collectAsState()
 
     val cycle = DateUtils.calculateCycle(settings.salaryCycleType, settings.salaryCycleDay)
@@ -368,6 +372,18 @@ fun AnalyticsScreen(viewModel: MainViewModel) {
                     )
                 }
             }
+        }
+
+        // Complete Interactive Financial Analytics Line Graph (Excel reference styling with Monthly/Yearly toggle)
+        item {
+            InteractiveFinancialAnalyticsSection(
+                allExpenses = allExpenses,
+                allIncomes = allIncomes,
+                allSalaries = allSalaries,
+                categories = categories,
+                currencySymbol = settings.currencySymbol,
+                isRoastMode = settings.reactionIntensity == "ROAST"
+            )
         }
 
         // Daily Expense Bar Chart

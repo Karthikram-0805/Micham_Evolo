@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.domain.sms.TransactionType
 import com.example.ui.components.CategoryIconHelper
+import com.example.ui.components.InteractiveFinancialAnalyticsSection
 import com.example.ui.theme.IncomeGreen
 import com.example.ui.theme.SpentRed
 import com.example.ui.viewmodel.MainViewModel
@@ -278,6 +279,24 @@ fun MonthlyTransactionDetailsScreen(
                     closingBalance = monthlyClosingBalance,
                     totalCount = totalTransactionCount,
                     currencySymbol = settings.currencySymbol
+                )
+            }
+
+            // Interactive Monthly & Yearly Financial Analytics Multi-Line Graph
+            item {
+                InteractiveFinancialAnalyticsSection(
+                    allExpenses = allExpenses,
+                    allIncomes = allIncomes,
+                    allSalaries = allSalaries,
+                    categories = categories,
+                    currencySymbol = settings.currencySymbol,
+                    isRoastMode = settings.reactionIntensity == "ROAST",
+                    initialMonth = selectedMonth,
+                    initialYear = selectedYear,
+                    onNavigateToTransactions = { m, y ->
+                        selectedMonth = m
+                        selectedYear = y
+                    }
                 )
             }
 

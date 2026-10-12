@@ -62,6 +62,7 @@ import androidx.core.content.ContextCompat
 import com.example.data.entity.ExpenseEntity
 import com.example.domain.model.ExpenseWithCategory
 import com.example.ui.components.ExpenseItemCard
+import com.example.ui.components.InteractiveFinancialAnalyticsSection
 import com.example.ui.components.MainBalanceCard
 import com.example.ui.theme.IncomeGreen
 import com.example.ui.theme.SpentRed
@@ -80,6 +81,10 @@ fun HomeScreen(
 ) {
     val summary by viewModel.financialSummary.collectAsState()
     val settings by viewModel.userSettings.collectAsState()
+    val allExpenses by viewModel.allExpenses.collectAsState()
+    val allIncomes by viewModel.allIncomes.collectAsState()
+    val allSalaries by viewModel.allSalaries.collectAsState()
+    val categories by viewModel.categories.collectAsState()
     val expensesWithCategory by viewModel.filteredExpenses.collectAsState()
     val pendingSmsTransactions by viewModel.pendingSmsTransactions.collectAsState()
 
@@ -226,6 +231,21 @@ fun HomeScreen(
                     userName = settings.userName,
                     isRoastMode = settings.reactionIntensity == "ROAST",
                     onOpenMonthlyTransactions = onOpenMonthlyTransactions
+                )
+            }
+
+            // Interactive Monthly and Yearly Financial Analytics Line Graph (Excel visual reference)
+            item {
+                InteractiveFinancialAnalyticsSection(
+                    allExpenses = allExpenses,
+                    allIncomes = allIncomes,
+                    allSalaries = allSalaries,
+                    categories = categories,
+                    currencySymbol = settings.currencySymbol,
+                    isRoastMode = settings.reactionIntensity == "ROAST",
+                    onNavigateToTransactions = { _, _ ->
+                        onOpenMonthlyTransactions()
+                    }
                 )
             }
 
