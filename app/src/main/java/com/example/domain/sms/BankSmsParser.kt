@@ -122,25 +122,26 @@ object BankSmsParser {
 
     // Known Indian banks and institutions
     private val KNOWN_BANKS = listOf(
-        "HDFC" to listOf("HDFC", "HDFCBK", "HDFC BANK"),
-        "SBI" to listOf("SBI", "SBIINB", "STATE BANK", "SBIPSG"),
-        "ICICI" to listOf("ICICI", "ICICIB", "ICICI BANK"),
-        "Axis" to listOf("AXIS", "AXISBK", "AXIS BANK", "UTIBNK"),
-        "Kotak" to listOf("KOTAK", "KOTAKB", "KOTAK MAHINDRA"),
-        "Punjab National Bank" to listOf("PNB", "PNBSMS", "PUNJAB NATIONAL"),
-        "Bank of Baroda" to listOf("BOB", "BOBTXN", "BARODA"),
-        "Canara Bank" to listOf("CANBNK", "CANARA"),
-        "IndusInd" to listOf("INDUS", "INDUSB", "INDUSIND"),
-        "Federal Bank" to listOf("FEDBNK", "FEDERAL"),
-        "Union Bank" to listOf("UNION", "UNIONB", "UBIN"),
-        "IDFC FIRST" to listOf("IDFC", "IDFCFB", "IDFC FIRST"),
-        "Yes Bank" to listOf("YESBNK", "YES BANK"),
-        "Paytm Payments Bank" to listOf("PAYTM", "PYTM"),
-        "Google Pay" to listOf("GPAY", "GOOGLEPAY"),
-        "PhonePe" to listOf("PHONEPE", "PHNPE"),
-        "Cred" to listOf("CRED"),
-        "Jupiter" to listOf("JUPITR", "JUPITER"),
-        "Fi Money" to listOf("FI_BNK", "FIMONEY")
+        Triple("HDFC Bank", "HDFC", listOf("HDFC", "HDFCBK", "HDFC BANK")),
+        Triple("ICICI Bank", "ICICI", listOf("ICICI", "ICICIB", "ICICI BANK")),
+        Triple("SBI", "SBI", listOf("SBI", "SBIINB", "STATE BANK", "SBIPSG")),
+        Triple("Axis Bank", "AXIS", listOf("AXIS", "AXISBK", "AXIS BANK", "UTIBNK", "UTIB")),
+        Triple("Indian Bank", "INDIAN", listOf("INDIAN", "INDBNK", "INDIAN BANK")),
+        Triple("Canara Bank", "CANARA", listOf("CANBNK", "CANARA")),
+        Triple("Kotak Mahindra Bank", "KOTAK", listOf("KOTAK", "KOTAKB", "KOTAK MAHINDRA")),
+        Triple("Bank of Baroda", "BOB", listOf("BOB", "BOBTXN", "BARODA")),
+        Triple("Punjab National Bank", "PNB", listOf("PNB", "PNBSMS", "PUNJAB NATIONAL")),
+        Triple("Union Bank", "UNION", listOf("UNION", "UNIONB", "UBIN")),
+        Triple("IndusInd Bank", "INDUSIND", listOf("INDUS", "INDUSB", "INDUSIND")),
+        Triple("Federal Bank", "FEDERAL", listOf("FEDBNK", "FEDERAL")),
+        Triple("IDFC FIRST Bank", "IDFC", listOf("IDFC", "IDFCFB", "IDFC FIRST")),
+        Triple("Yes Bank", "YES", listOf("YESBNK", "YES BANK")),
+        Triple("Paytm Payments Bank", "PAYTM", listOf("PAYTM", "PYTM")),
+        Triple("Google Pay", "GPAY", listOf("GPAY", "GOOGLEPAY")),
+        Triple("PhonePe", "PHONEPE", listOf("PHONEPE", "PHNPE")),
+        Triple("Cred", "CRED", listOf("CRED")),
+        Triple("Jupiter", "JUPITER", listOf("JUPITR", "JUPITER")),
+        Triple("Fi Money", "FI", listOf("FI_BNK", "FIMONEY"))
     )
 
     /**
@@ -206,7 +207,7 @@ object BankSmsParser {
         }
 
         // STEP 8: Extract Bank / Financial Institution
-        val bankName = detectBank(cleanSender, cleanBody)
+        val (bankName, bankCode) = detectBank(cleanSender, cleanBody)
 
         // STEP 9: Extract Account / Card Information
         val cardMaskedNumber = extractCardMaskedNumber(cleanBody)
@@ -267,6 +268,7 @@ object BankSmsParser {
             amount = amount,
             type = transactionType,
             bankName = bankName,
+            bankCode = bankCode,
             accountInfo = accountInfo,
             paymentMethod = paymentMethod,
             payeeOrMerchant = payee,
@@ -366,15 +368,19 @@ object BankSmsParser {
         return minIndex
     }
 
-    private fun detectBank(sender: String, body: String): String {
-        for ((bankName, aliases) in KNOWN_BANKS) {
+    fun detectBank(sender: String, body: String): Pair<String, String> {
+        val upperSender = sender.uppercase(Locale.ENGLISH)
+        val upperBody = body.uppercase(Locale.ENGLISH)
+        for ((bankName, bankCode, aliases) in KNOWN_BANKS) {
             for (alias in aliases) {
-                if (sender.contains(alias, ignoreCase = true) || body.contains(alias, ignoreCase = true)) {
-                    return bankName
+                val upperAlias = alias.uppercase(Locale.ENGLISH)
+                if (upperSender.contains(upperAlias) || upperBody.contains(upperAlias)) {
+                    return bankName to bankCode
                 }
             }
         }
-        return if (sender.isNotBlank()) sender.takeLast(6) else "Bank"
+        val fallback = if (sender.isNotBlank()) sender.takeLast(6) else "Other Bank"
+        return fallback to "OTHER"
     }
 
     private fun extractAccountInfo(body: String): String {

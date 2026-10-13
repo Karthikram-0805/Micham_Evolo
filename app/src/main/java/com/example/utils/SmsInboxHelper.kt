@@ -103,6 +103,8 @@ object SmsInboxHelper {
             }
         }
 
+        val registeredBanks = db.bankDao().getAllBanksSnapshot()
+
         // 2. Scan telephony SMS inbox for new messages
         val contentResolver = context.contentResolver
         val uri: Uri = Telephony.Sms.Inbox.CONTENT_URI
@@ -137,6 +139,24 @@ object SmsInboxHelper {
                     val parseResult = com.example.domain.sms.BankSmsParser.parse(sender, body, dateMillis)
                     if (parseResult is BankSmsParseResult.Success) {
                         val tx = parseResult.transaction
+
+                        // Enforce Bank-Wise Tracking Toggle
+                        val matchingBank = com.example.domain.sms.BankTrackingHelper.findMatchingBank(
+                            sender = sender,
+                            body = body,
+                            bankCode = tx.bankCode,
+                            bankName = tx.bankName,
+                            registeredBanks = registeredBanks
+                        )
+                        val (isTrackingAllowed, _) = com.example.domain.sms.BankTrackingHelper.isTrackingAllowed(
+                            bank = matchingBank,
+                            messageTimestamp = dateMillis,
+                            isHistoricalImport = false
+                        )
+                        if (!isTrackingAllowed) {
+                            continue
+                        }
+
                         if (!seenHashes.contains(tx.uniqueHash)) {
                             seenHashes.add(tx.uniqueHash)
 
@@ -393,6 +413,103 @@ object SmsInboxHelper {
         } catch (e: SecurityException) {
             // Permission not granted
             e.printStackTrace()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        SmsScanSummary(
+            totalScanned = totalScanned,
+            debitsAdded = debitsAdded,
+            creditsAdded = creditsAdded,
+            duplicatesSkipped = duplicatesSkipped,
+            nonTransactionsIgnored = ignored,
+            totalDebitAmount = totalDebitAmount,
+            totalCreditAmount = totalCreditAmount
+        )
+    }
+
+    suspend fun importHistoricalSmsForBank(
+        context: Context,
+        bank: com.example.data.entity.BankEntity,
+        maxMessagesToScan: Int = 200
+    ): SmsScanSummary = withContext(Dispatchers.IO) {
+        var totalScanned = 0
+        var debitsAdded = 0
+        var creditsAdded = 0
+        var duplicatesSkipped = 0
+        var ignored = 0
+        var totalDebitAmount = 0.0
+        var totalCreditAmount = 0.0
+
+        val contentResolver = context.contentResolver
+        val uri: Uri = Telephony.Sms.Inbox.CONTENT_URI
+        val projection = arrayOf(
+            Telephony.Sms.Inbox.ADDRESS,
+            Telephony.Sms.Inbox.BODY,
+            Telephony.Sms.Inbox.DATE
+        )
+
+        try {
+            val cursor = contentResolver.query(
+                uri,
+                projection,
+                null,
+                null,
+                "${Telephony.Sms.Inbox.DATE} DESC"
+            )
+
+            cursor?.use {
+                val addressIdx = it.getColumnIndex(Telephony.Sms.Inbox.ADDRESS)
+                val bodyIdx = it.getColumnIndex(Telephony.Sms.Inbox.BODY)
+                val dateIdx = it.getColumnIndex(Telephony.Sms.Inbox.DATE)
+
+                while (it.moveToNext() && totalScanned < maxMessagesToScan) {
+                    val sender = if (addressIdx != -1) it.getString(addressIdx) ?: "" else ""
+                    val body = if (bodyIdx != -1) it.getString(bodyIdx) ?: "" else ""
+                    val dateMillis = if (dateIdx != -1) it.getLong(dateIdx) else System.currentTimeMillis()
+
+                    val parseResult = com.example.domain.sms.BankSmsParser.parse(sender, body, dateMillis)
+                    if (parseResult is BankSmsParseResult.Success) {
+                        val tx = parseResult.transaction
+                        val isForThisBank = tx.bankCode.equals(bank.bankCode, ignoreCase = true) ||
+                                tx.bankName.equals(bank.bankName, ignoreCase = true) ||
+                                bank.senderPatterns.split(",").any { pattern ->
+                                    pattern.isNotBlank() && (sender.contains(pattern, ignoreCase = true) || body.contains(pattern, ignoreCase = true))
+                                }
+
+                        if (!isForThisBank) {
+                            continue
+                        }
+
+                        totalScanned++
+
+                        val result = BankSmsProcessor.processIncomingSms(
+                            context = context,
+                            sender = sender,
+                            body = body,
+                            timestamp = dateMillis,
+                            forceProcess = true
+                        )
+
+                        when (result) {
+                            is BankSmsProcessResult.AddedAsExpense -> {
+                                debitsAdded++
+                                totalDebitAmount += result.amount
+                            }
+                            is BankSmsProcessResult.AddedAsIncome -> {
+                                creditsAdded++
+                                totalCreditAmount += result.amount
+                            }
+                            is BankSmsProcessResult.Duplicate -> {
+                                duplicatesSkipped++
+                            }
+                            is BankSmsProcessResult.Ignored -> {
+                                ignored++
+                            }
+                        }
+                    }
+                }
+            }
         } catch (e: Exception) {
             e.printStackTrace()
         }

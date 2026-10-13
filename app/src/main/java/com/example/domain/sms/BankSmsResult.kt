@@ -20,6 +20,7 @@ data class ParsedBankTransaction(
     val amount: Double,
     val type: TransactionType,
     val bankName: String,
+    val bankCode: String = "",
     val accountInfo: String,
     val paymentMethod: String,
     val payeeOrMerchant: String,

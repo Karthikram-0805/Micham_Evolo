@@ -6,6 +6,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.example.data.dao.BankDao
 import com.example.data.dao.CategoryDao
 import com.example.data.dao.CreditCardDao
 import com.example.data.dao.ExpenseDao
@@ -14,6 +15,7 @@ import com.example.data.dao.ProcessedSmsDao
 import com.example.data.dao.RecurringExpenseDao
 import com.example.data.dao.SalaryDao
 import com.example.data.dao.SavingsGoalDao
+import com.example.data.entity.BankEntity
 import com.example.data.entity.CategoryEntity
 import com.example.data.entity.CreditCardEntity
 import com.example.data.entity.ExpenseEntity
@@ -35,9 +37,10 @@ import kotlinx.coroutines.launch
         SavingsGoalEntity::class,
         RecurringExpenseEntity::class,
         ProcessedSmsEntity::class,
-        CreditCardEntity::class
+        CreditCardEntity::class,
+        BankEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -49,6 +52,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun recurringExpenseDao(): RecurringExpenseDao
     abstract fun processedSmsDao(): ProcessedSmsDao
     abstract fun creditCardDao(): CreditCardDao
+    abstract fun bankDao(): BankDao
 
     companion object {
         @Volatile
@@ -88,6 +92,63 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 1. Create banks table
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `banks` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `bankName` TEXT NOT NULL,
+                        `bankCode` TEXT NOT NULL,
+                        `isTrackingEnabled` INTEGER NOT NULL DEFAULT 0,
+                        `enabledAtTimestamp` INTEGER NOT NULL DEFAULT 0,
+                        `senderPatterns` TEXT NOT NULL DEFAULT '',
+                        `colorHex` TEXT NOT NULL DEFAULT '#3B82F6',
+                        `isCustom` INTEGER NOT NULL DEFAULT 0,
+                        `createdAt` INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_banks_bankCode` ON `banks` (`bankCode`)")
+
+                // 2. Add billingDay, dueDay, openingOutstanding to credit_cards
+                db.execSQL("ALTER TABLE `credit_cards` ADD COLUMN `billingDay` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `credit_cards` ADD COLUMN `dueDay` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `credit_cards` ADD COLUMN `openingOutstanding` REAL NOT NULL DEFAULT 0.0")
+
+                // Pre-populate default banks with tracking OFF
+                val now = System.currentTimeMillis()
+                val defaultBanks = listOf(
+                    Triple("HDFC Bank", "HDFC", "#004C8F"),
+                    Triple("ICICI Bank", "ICICI", "#F37021"),
+                    Triple("SBI", "SBI", "#280071"),
+                    Triple("Axis Bank", "AXIS", "#97144D"),
+                    Triple("Indian Bank", "INDIAN", "#0A3B82"),
+                    Triple("Canara Bank", "CANARA", "#0083CA"),
+                    Triple("Kotak Mahindra Bank", "KOTAK", "#ED1B24"),
+                    Triple("Bank of Baroda", "BOB", "#F26522"),
+                    Triple("Punjab National Bank", "PNB", "#A20A3C")
+                )
+                for ((name, code, color) in defaultBanks) {
+                    val patterns = when (code) {
+                        "HDFC" -> "HDFCBK,HDFC"
+                        "ICICI" -> "ICICIB,ICICI"
+                        "SBI" -> "SBI,SBIINB,SBIPSG,STATE BANK"
+                        "AXIS" -> "AXIS,AXISBK,UTIB,UTIBNK"
+                        "INDIAN" -> "INDBNK,INDIAN,INDIAN BANK"
+                        "CANARA" -> "CANBNK,CANARA"
+                        "KOTAK" -> "KOTAK,KOTAKB"
+                        "BOB" -> "BOB,BOBTXN,BARODA"
+                        "PNB" -> "PNB,PNBSMS"
+                        else -> code
+                    }
+                    db.execSQL("""
+                        INSERT OR IGNORE INTO `banks` (`bankName`, `bankCode`, `isTrackingEnabled`, `enabledAtTimestamp`, `senderPatterns`, `colorHex`, `isCustom`, `createdAt`)
+                        VALUES ('$name', '$code', 0, 0, '$patterns', '$color', 0, $now)
+                    """.trimIndent())
+                }
+            }
+        }
+
         fun getDatabase(context: Context, scope: CoroutineScope): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -95,7 +156,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "micham_evlo.db"
                 )
-                    .addMigrations(MIGRATION_3_4)
+                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5)
                     .fallbackToDestructiveMigration()
                     .addCallback(AppDatabaseCallback(scope))
                     .build()
@@ -124,6 +185,18 @@ abstract class AppDatabase : RoomDatabase() {
             CategoryEntity(name = "Other", iconName = "more_horiz", colorHex = "#64748B")
         )
 
+        val DEFAULT_BANKS = listOf(
+            BankEntity(bankName = "HDFC Bank", bankCode = "HDFC", isTrackingEnabled = false, senderPatterns = "HDFCBK,HDFC", colorHex = "#004C8F"),
+            BankEntity(bankName = "ICICI Bank", bankCode = "ICICI", isTrackingEnabled = false, senderPatterns = "ICICIB,ICICI", colorHex = "#F37021"),
+            BankEntity(bankName = "SBI", bankCode = "SBI", isTrackingEnabled = false, senderPatterns = "SBI,SBIINB,SBIPSG,STATE BANK", colorHex = "#280071"),
+            BankEntity(bankName = "Axis Bank", bankCode = "AXIS", isTrackingEnabled = false, senderPatterns = "AXIS,AXISBK,UTIB,UTIBNK", colorHex = "#97144D"),
+            BankEntity(bankName = "Indian Bank", bankCode = "INDIAN", isTrackingEnabled = false, senderPatterns = "INDBNK,INDIAN,INDIAN BANK", colorHex = "#0A3B82"),
+            BankEntity(bankName = "Canara Bank", bankCode = "CANARA", isTrackingEnabled = false, senderPatterns = "CANBNK,CANARA", colorHex = "#0083CA"),
+            BankEntity(bankName = "Kotak Mahindra Bank", bankCode = "KOTAK", isTrackingEnabled = false, senderPatterns = "KOTAK,KOTAKB", colorHex = "#ED1B24"),
+            BankEntity(bankName = "Bank of Baroda", bankCode = "BOB", isTrackingEnabled = false, senderPatterns = "BOB,BOBTXN,BARODA", colorHex = "#F26522"),
+            BankEntity(bankName = "Punjab National Bank", bankCode = "PNB", isTrackingEnabled = false, senderPatterns = "PNB,PNBSMS", colorHex = "#A20A3C")
+        )
+
         private class AppDatabaseCallback(
             private val scope: CoroutineScope
         ) : RoomDatabase.Callback() {
@@ -132,6 +205,7 @@ abstract class AppDatabase : RoomDatabase() {
                 INSTANCE?.let { database ->
                     scope.launch(Dispatchers.IO) {
                         populateDefaultCategories(database.categoryDao())
+                        populateDefaultBanks(database.bankDao())
                     }
                 }
             }
@@ -140,6 +214,12 @@ abstract class AppDatabase : RoomDatabase() {
         suspend fun populateDefaultCategories(categoryDao: CategoryDao) {
             if (categoryDao.getCategoryCount() == 0) {
                 categoryDao.insertCategories(DEFAULT_CATEGORIES)
+            }
+        }
+
+        suspend fun populateDefaultBanks(bankDao: BankDao) {
+            if (bankDao.getBankCount() == 0) {
+                bankDao.insertBanks(DEFAULT_BANKS)
             }
         }
     }

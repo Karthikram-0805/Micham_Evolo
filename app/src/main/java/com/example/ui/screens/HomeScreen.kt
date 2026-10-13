@@ -20,11 +20,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddCard
 import androidx.compose.material.icons.filled.CreditCard
@@ -42,6 +44,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -81,10 +85,12 @@ fun HomeScreen(
     onOpenSmsSync: () -> Unit,
     onEditExpense: (ExpenseEntity) -> Unit,
     onOpenMonthlyTransactions: () -> Unit = {},
-    onOpenCreditCard: () -> Unit = {}
+    onOpenCreditCard: () -> Unit = {},
+    onOpenMyBanks: () -> Unit = {}
 ) {
     val summary by viewModel.financialSummary.collectAsState()
     val ccSummary by viewModel.creditCardSummary.collectAsState()
+    val allBanks by viewModel.allBanks.collectAsState()
     val settings by viewModel.userSettings.collectAsState()
     val allExpenses by viewModel.allExpenses.collectAsState()
     val allIncomes by viewModel.allIncomes.collectAsState()
@@ -165,6 +171,16 @@ fun HomeScreen(
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = onOpenMyBanks,
+                            modifier = Modifier.testTag("home_my_banks_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AccountBalance,
+                                contentDescription = "My Banks",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
                         IconButton(
                             onClick = onOpenCreditCard,
                             modifier = Modifier.testTag("home_credit_card_button")
@@ -249,7 +265,208 @@ fun HomeScreen(
                 )
             }
 
-            // Dedicated Credit Card Option on Dashboard
+            // 6. CREDIT CARD OUTSTANDING CARD ON MAIN DASHBOARD
+            item {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpenCreditCard() }
+                        .testTag("home_credit_card_dashboard_card")
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.CreditCard,
+                                            contentDescription = "Credit Card Outstanding",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "Credit Card Outstanding 💳",
+                                            fontWeight = FontWeight.Bold,
+                                            style = MaterialTheme.typography.titleMedium
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = if (ccSummary.totalOutstanding > 0) SpentRed else IncomeGreen
+                                        ) {
+                                            Text(
+                                                text = if (ccSummary.totalOutstanding > 0) "DUE" else "SETTLED",
+                                                color = Color.White,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Black,
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                                fontSize = 9.sp
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = "${ccSummary.cards.size} Cards Registered • Tap to manage",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Outstanding & Spend Metrics Row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column {
+                                Text(
+                                    text = "Total Outstanding",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.outline
+                                )
+                                Text(
+                                    text = CurrencyFormatter.formatIndian(ccSummary.totalOutstanding, settings.currencySymbol),
+                                    fontWeight = FontWeight.Black,
+                                    style = MaterialTheme.typography.titleLarge,
+                                    color = if (ccSummary.totalOutstanding > 0) SpentRed else IncomeGreen
+                                )
+                            }
+
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(
+                                    text = "This Month Spending",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.outline
+                                )
+                                Text(
+                                    text = CurrencyFormatter.formatIndian(ccSummary.totalSpendingThisMonth, settings.currencySymbol),
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+
+                        // Nearest Due Date & Upcoming Payment info if available
+                        if (ccSummary.totalOutstanding > 0) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "Nearest Due: ${ccSummary.nearestDueDate}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = WarningOrange
+                                    )
+                                    Text(
+                                        text = "Upcoming: ${CurrencyFormatter.formatIndian(ccSummary.upcomingPaymentAmount, settings.currencySymbol)}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                        }
+
+                        // Card-wise breakdown preview
+                        if (ccSummary.cards.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                items(ccSummary.cards) { cardDetail ->
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.surface,
+                                        border = androidx.compose.foundation.BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                                    ) {
+                                        Text(
+                                            text = "${cardDetail.card.cardName.take(18)}: ${CurrencyFormatter.formatIndian(cardDetail.currentOutstanding, settings.currencySymbol)}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.Medium,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Estimated Net After Card Dues Callout
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "Net After Card Dues:",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = CurrencyFormatter.formatIndian(ccSummary.netAfterCardDues, settings.currencySymbol),
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Black,
+                                        color = if (ccSummary.netAfterCardDues >= 0) IncomeGreen else SpentRed
+                                    )
+                                }
+                                Text(
+                                    text = "Estimated amount (Main Wallet − Card Dues). Does not deduct from actual wallet balance.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 1. MY BANKS — SMS TRACKING DASHBOARD CARD
             item {
                 Card(
                     shape = RoundedCornerShape(16.dp),
@@ -258,88 +475,116 @@ fun HomeScreen(
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onOpenCreditCard() }
-                        .testTag("home_credit_card_dashboard_card")
+                        .testTag("home_my_banks_section")
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Surface(
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                                modifier = Modifier.size(42.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.Default.CreditCard,
-                                        contentDescription = "Credit Cards",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(24.dp)
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.AccountBalance,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        text = "My Banks — SMS Tracking 🏦",
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.titleSmall
+                                    )
+                                    Text(
+                                        text = "${allBanks.count { it.isTrackingEnabled }} of ${allBanks.size} banks active",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
+
+                            TextButton(
+                                onClick = onOpenMyBanks,
+                                modifier = Modifier.testTag("manage_all_banks_button")
+                            ) {
+                                Text("Manage ->", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Individual sliding switches for top banks
+                        allBanks.take(4).forEach { bank ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
+                                    val bColor = try {
+                                        Color(android.graphics.Color.parseColor(bank.colorHex))
+                                    } catch (e: Exception) {
+                                        MaterialTheme.colorScheme.primary
+                                    }
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = bColor.copy(alpha = 0.15f),
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text(
+                                                text = bank.bankCode.take(2),
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 10.sp,
+                                                color = bColor
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "Credit Card Expenses 💳",
-                                        fontWeight = FontWeight.Bold,
-                                        style = MaterialTheme.typography.titleSmall
+                                        text = bank.bankName,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Medium
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Surface(
                                         shape = RoundedCornerShape(4.dp),
-                                        color = if (ccSummary.totalOutstanding > 0) SpentRed else IncomeGreen
+                                        color = if (bank.isTrackingEnabled) IncomeGreen else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
                                     ) {
                                         Text(
-                                            text = if (ccSummary.totalOutstanding > 0) "DUE" else "SETTLED",
-                                            color = Color.White,
+                                            text = if (bank.isTrackingEnabled) "ON" else "OFF",
+                                            color = if (bank.isTrackingEnabled) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                                             style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Black,
-                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
                                             fontSize = 9.sp
                                         )
                                     }
                                 }
-                                Text(
-                                    text = if (ccSummary.cards.isNotEmpty()) {
-                                        "${ccSummary.cards.size} Cards • Outstanding: ${CurrencyFormatter.formatIndian(ccSummary.totalOutstanding, settings.currencySymbol)}"
-                                    } else {
-                                        "Track card spends separately • Won't affect wallet"
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
 
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(horizontalAlignment = Alignment.End) {
-                                Text(
-                                    text = CurrencyFormatter.formatIndian(ccSummary.totalSpendingThisMonth, settings.currencySymbol),
-                                    fontWeight = FontWeight.Black,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    color = SpentRed
-                                )
-                                Text(
-                                    text = "This Month",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontSize = 10.sp,
-                                    color = MaterialTheme.colorScheme.outline
+                                Switch(
+                                    checked = bank.isTrackingEnabled,
+                                    onCheckedChange = { isChecked ->
+                                        viewModel.toggleBankTracking(bank, isChecked)
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedTrackColor = IncomeGreen
+                                    ),
+                                    modifier = Modifier.testTag("home_switch_${bank.bankCode}")
                                 )
                             }
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp)
-                            )
                         }
                     }
                 }

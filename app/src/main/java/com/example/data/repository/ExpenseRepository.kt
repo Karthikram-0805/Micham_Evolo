@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.Flow
 import java.time.LocalDate
 
 import com.example.data.dao.CreditCardDao
+import com.example.data.dao.BankDao
+import com.example.data.entity.BankEntity
 import com.example.data.entity.CreditCardEntity
 
 class ExpenseRepository(
@@ -26,8 +28,22 @@ class ExpenseRepository(
     private val incomeDao: IncomeDao,
     private val savingsGoalDao: SavingsGoalDao,
     private val recurringExpenseDao: RecurringExpenseDao,
-    private val creditCardDao: CreditCardDao? = null
+    private val creditCardDao: CreditCardDao? = null,
+    private val bankDao: BankDao? = null
 ) {
+    // Banks
+    val allBanks: Flow<List<BankEntity>> = bankDao?.getAllBanks() ?: kotlinx.coroutines.flow.emptyFlow()
+
+    suspend fun getAllBanksSnapshot(): List<BankEntity> = bankDao?.getAllBanksSnapshot() ?: emptyList()
+    suspend fun updateBankTrackingStatus(bankId: Long, isEnabled: Boolean) {
+        val now = if (isEnabled) System.currentTimeMillis() else 0L
+        bankDao?.updateTrackingStatus(bankId, isEnabled, now)
+    }
+    suspend fun insertBank(bank: BankEntity): Long = bankDao?.insertBank(bank) ?: 0L
+    suspend fun updateBank(bank: BankEntity) { bankDao?.updateBank(bank) }
+    suspend fun deleteBank(bank: BankEntity) { bankDao?.deleteBank(bank) }
+    suspend fun deleteBankById(id: Long) { bankDao?.deleteBankById(id) }
+
     // Credit Cards
     val allCreditCards: Flow<List<CreditCardEntity>> = creditCardDao?.getAllCreditCards() ?: kotlinx.coroutines.flow.emptyFlow()
 

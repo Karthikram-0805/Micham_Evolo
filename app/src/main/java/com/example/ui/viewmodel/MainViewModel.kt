@@ -52,6 +52,8 @@ import com.example.data.entity.CreditCardEntity
 import com.example.domain.model.CardSpendingDetail
 import com.example.domain.model.CreditCardSummary
 
+import com.example.data.entity.BankEntity
+
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val database = AppDatabase.getDatabase(application, viewModelScope)
@@ -62,9 +64,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         incomeDao = database.incomeDao(),
         savingsGoalDao = database.savingsGoalDao(),
         recurringExpenseDao = database.recurringExpenseDao(),
-        creditCardDao = database.creditCardDao()
+        creditCardDao = database.creditCardDao(),
+        bankDao = database.bankDao()
     )
     val preferencesRepository = UserPreferencesRepository(application)
+
+    // Banks for SMS Tracking
+    val allBanks: StateFlow<List<BankEntity>> = repository.allBanks.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5000),
+        emptyList()
+    )
 
     // Credit Cards
     val allCreditCards: StateFlow<List<CreditCardEntity>> = repository.allCreditCards.stateIn(
@@ -221,8 +231,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         allCreditCards,
         allExpenses,
         allIncomes,
+        financialSummary,
         userSettings
-    ) { cards, expenses, incomes, settings ->
+    ) { cards, expenses, incomes, finSummary, settings ->
         val cycle = DateUtils.calculateCycle(settings.salaryCycleType, settings.salaryCycleDay)
 
         // All credit card purchases in current cycle
@@ -241,9 +252,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val totalPurchasesAmount = allCcPurchases.sumOf { it.amount }
         val totalPaymentsAmount = allCcPayments.sumOf { it.amount }
         val totalRefundsAmount = allCcRefunds.sumOf { it.amount }
+        val totalOpeningOutstanding = cards.sumOf { it.openingOutstanding }
 
         val totalOutstanding = BigDecimal(
-            (totalPurchasesAmount - totalPaymentsAmount - totalRefundsAmount).coerceAtLeast(0.0)
+            (totalOpeningOutstanding + totalPurchasesAmount - totalPaymentsAmount - totalRefundsAmount).coerceAtLeast(0.0)
         ).setScale(2, RoundingMode.HALF_UP).toDouble()
 
         val paymentsThisMonth = allCcPayments.filter { it.date >= cycle.startDate && it.date <= cycle.endDate }.sumOf { it.amount }
@@ -282,8 +294,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 it.cardMaskedNumber == card.cardNumberMasked
             }.sumOf { it.amount }
 
-            val cardOutstanding = BigDecimal((cardAllPurchases - cardPayments - cardRefunds).coerceAtLeast(0.0))
-                .setScale(2, RoundingMode.HALF_UP).toDouble()
+            val cardOutstanding = BigDecimal(
+                (card.openingOutstanding + cardAllPurchases - cardPayments - cardRefunds).coerceAtLeast(0.0)
+            ).setScale(2, RoundingMode.HALF_UP).toDouble()
 
             val availLimit = if (card.creditLimit > 0) {
                 BigDecimal((card.creditLimit - cardOutstanding).coerceAtLeast(0.0)).setScale(2, RoundingMode.HALF_UP).toDouble()
@@ -306,6 +319,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         val totalAvailableLimit = cardDetails.sumOf { it.availableLimit }
+
+        val cardsWithDues = cardDetails.filter { it.currentOutstanding > 0 }
+        val upcomingPaymentAmount = if (cardsWithDues.isNotEmpty()) {
+            val dueCards = cardsWithDues.filter { it.card.dueDay > 0 }
+            if (dueCards.isNotEmpty()) dueCards.sumOf { it.currentOutstanding } else totalOutstanding
+        } else 0.0
+
+        val nearestDueCard = cardsWithDues.filter { it.card.dueDay > 0 }.minByOrNull { it.card.dueDay }
+        val nearestDueDate = if (nearestDueCard != null) {
+            "Due on ${nearestDueCard.card.dueDay}th"
+        } else if (totalOutstanding > 0) {
+            "Due this billing cycle"
+        } else {
+            "No dues pending"
+        }
+
+        val netAfterCardDues = BigDecimal(finSummary.remainingBalance - totalOutstanding).setScale(2, RoundingMode.HALF_UP).toDouble()
 
         // Monthly Daily Spends for graph
         val dailyMap = mutableMapOf<String, Double>()
@@ -336,6 +366,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             totalOutstanding = totalOutstanding,
             totalPaymentsMade = paymentsThisMonth,
             totalAvailableLimit = totalAvailableLimit,
+            upcomingPaymentAmount = upcomingPaymentAmount,
+            nearestDueDate = nearestDueDate,
+            netAfterCardDues = netAfterCardDues,
             cards = cardDetails,
             monthlyDailySpends = dailySpends,
             recentTransactions = (allCcPurchases + allCcPayments).sortedByDescending { it.date },
@@ -458,6 +491,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // Initial setup check
         viewModelScope.launch(Dispatchers.IO) {
             AppDatabase.populateDefaultCategories(database.categoryDao())
+            AppDatabase.populateDefaultBanks(database.bankDao())
             repository.checkAndApplyDueRecurringExpenses()
             repository.reconcileDuplicateTransactions()
 
@@ -567,13 +601,53 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // Bank SMS Tracking Operations
+    fun toggleBankTracking(bank: BankEntity, isEnabled: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.updateBankTrackingStatus(bank.id, isEnabled)
+        }
+    }
+
+    fun addCustomBank(bankName: String, senderPatterns: String = "", colorHex: String = "#3B82F6") {
+        viewModelScope.launch(Dispatchers.IO) {
+            val code = bankName.filter { it.isLetter() }.take(6).uppercase(java.util.Locale.ENGLISH)
+            val newBank = BankEntity(
+                bankName = bankName.trim(),
+                bankCode = code.ifBlank { "CUSTOM" },
+                isTrackingEnabled = false,
+                senderPatterns = senderPatterns.trim().ifBlank { code },
+                colorHex = colorHex,
+                isCustom = true
+            )
+            repository.insertBank(newBank)
+        }
+    }
+
+    fun deleteBank(bank: BankEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.deleteBank(bank)
+        }
+    }
+
+    fun importHistoricalSmsForBank(bank: BankEntity, onResult: (SmsScanSummary) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val summary = SmsInboxHelper.importHistoricalSmsForBank(getApplication(), bank)
+            withContext(Dispatchers.Main) {
+                onResult(summary)
+            }
+        }
+    }
+
     // Credit Card Operations
     fun addCreditCard(
         cardName: String,
         bankName: String,
         cardNumberMasked: String,
         creditLimit: Double,
-        colorHex: String = "#3B82F6"
+        colorHex: String = "#3B82F6",
+        billingDay: Int = 0,
+        dueDay: Int = 0,
+        openingOutstanding: Double = 0.0
     ) {
         viewModelScope.launch(Dispatchers.IO) {
             val masked = if (cardNumberMasked.startsWith("XX", ignoreCase = true)) {
@@ -587,9 +661,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 bankName = bankName.trim().ifBlank { "Bank" },
                 cardNumberMasked = masked,
                 creditLimit = creditLimit,
-                colorHex = colorHex
+                colorHex = colorHex,
+                billingDay = billingDay,
+                dueDay = dueDay,
+                openingOutstanding = openingOutstanding
             )
             repository.insertCreditCard(card)
+        }
+    }
+
+    fun updateCreditCardDetails(
+        card: CreditCardEntity,
+        cardName: String,
+        creditLimit: Double,
+        billingDay: Int,
+        dueDay: Int,
+        openingOutstanding: Double
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val updated = card.copy(
+                cardName = cardName.trim().ifBlank { card.cardName },
+                creditLimit = creditLimit,
+                billingDay = billingDay,
+                dueDay = dueDay,
+                openingOutstanding = openingOutstanding
+            )
+            repository.updateCreditCard(updated)
         }
     }
 

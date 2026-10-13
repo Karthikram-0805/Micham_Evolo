@@ -71,6 +71,27 @@ object BankSmsProcessor {
         val processedDao = db.processedSmsDao()
         val incomeDao = db.incomeDao()
         val expenseDao = db.expenseDao()
+        val bankDao = db.bankDao()
+
+        // Enforce Bank-Wise SMS Tracking Toggle
+        val registeredBanks = bankDao.getAllBanksSnapshot()
+        val matchingBank = BankTrackingHelper.findMatchingBank(
+            sender = sender,
+            body = body,
+            bankCode = transaction.bankCode,
+            bankName = transaction.bankName,
+            registeredBanks = registeredBanks
+        )
+
+        val (isTrackingAllowed, trackingReason) = BankTrackingHelper.isTrackingAllowed(
+            bank = matchingBank,
+            messageTimestamp = timestamp,
+            isHistoricalImport = forceProcess
+        )
+
+        if (!isTrackingAllowed) {
+            return@withContext BankSmsProcessResult.Ignored(trackingReason)
+        }
 
         val existing = processedDao.getProcessedByHashOrRef(transaction.uniqueHash, "", transaction.referenceId)
         if (existing != null) {

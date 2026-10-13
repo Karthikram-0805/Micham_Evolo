@@ -17,5 +17,8 @@ data class CreditCardEntity(
     val cardNumberMasked: String, // e.g. "XX7609"
     val creditLimit: Double = 0.0, // optional user-entered limit
     val colorHex: String = "#3B82F6",
+    val billingDay: Int = 0, // optional 1-31
+    val dueDay: Int = 0, // optional 1-31
+    val openingOutstanding: Double = 0.0, // optional opening outstanding balance
     val createdAt: Long = System.currentTimeMillis()
 )

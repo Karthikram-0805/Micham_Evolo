@@ -18,7 +18,7 @@ class BankSmsParserTest {
         val transaction = (result as BankSmsParseResult.Success).transaction
         assertEquals(500.0, transaction.amount, 0.001)
         assertEquals(TransactionType.DEBIT, transaction.type)
-        assertEquals("HDFC", transaction.bankName)
+        assertEquals("HDFC Bank", transaction.bankName)
         assertEquals("UPI", transaction.paymentMethod)
         assertTrue(transaction.accountInfo.contains("1234"))
     }
