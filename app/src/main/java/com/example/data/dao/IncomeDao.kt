@@ -20,8 +20,17 @@ interface IncomeDao {
     @Query("SELECT * FROM incomes WHERE date >= :startDate AND date <= :endDate ORDER BY date DESC")
     fun getIncomesBetweenDates(startDate: String, endDate: String): Flow<List<IncomeEntity>>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertIncome(income: IncomeEntity): Long
+
+    @Query("SELECT * FROM incomes WHERE smsHash = :smsHash LIMIT 1")
+    suspend fun getIncomeBySmsHash(smsHash: String): IncomeEntity?
+
+    @Query("SELECT COUNT(*) FROM incomes WHERE (:smsHash IS NOT NULL AND :smsHash != '' AND smsHash = :smsHash) OR (:referenceId != '' AND referenceId = :referenceId) OR (:smsId != '' AND smsId = :smsId)")
+    suspend fun countBySmsIdentity(smsHash: String?, referenceId: String, smsId: String): Int
+
+    @Query("SELECT * FROM incomes WHERE isCreditCardRefund = 1 ORDER BY date DESC")
+    fun getAllCreditCardRefunds(): Flow<List<IncomeEntity>>
 
     @Update
     suspend fun updateIncome(income: IncomeEntity)
@@ -35,7 +44,7 @@ interface IncomeDao {
     @Query("SELECT * FROM incomes")
     suspend fun getAllIncomesSnapshot(): List<IncomeEntity>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAll(incomes: List<IncomeEntity>)
 
     @Query("DELETE FROM incomes")

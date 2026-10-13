@@ -209,10 +209,37 @@ object BankSmsParser {
         val bankName = detectBank(cleanSender, cleanBody)
 
         // STEP 9: Extract Account / Card Information
-        val accountInfo = extractAccountInfo(cleanBody)
+        val cardMaskedNumber = extractCardMaskedNumber(cleanBody)
+        val isCcTransaction = isCreditCardTransaction(cleanBody)
+        val isCcBillPayment = isCreditCardBillPayment(cleanBody)
+        val isCcRefund = isCreditCardRefund(cleanBody) || (transactionType == TransactionType.CREDIT && isCcTransaction && !isCcBillPayment)
+
+        val isCreditCardExpense = isCcTransaction && !isCcBillPayment && transactionType == TransactionType.DEBIT
+
+        val cardName = if (isCcTransaction || cardMaskedNumber.isNotBlank()) {
+            if (bankName.isNotBlank() && cardMaskedNumber.isNotBlank()) {
+                "$bankName Credit Card $cardMaskedNumber"
+            } else if (bankName.isNotBlank()) {
+                "$bankName Credit Card"
+            } else if (cardMaskedNumber.isNotBlank()) {
+                "Credit Card $cardMaskedNumber"
+            } else "Credit Card"
+        } else ""
+
+        val accountInfo = if (cardMaskedNumber.isNotBlank()) {
+            cardMaskedNumber
+        } else {
+            extractAccountInfo(cleanBody)
+        }
 
         // STEP 10: Extract Payment Method
-        val paymentMethod = detectPaymentMethod(cleanBody)
+        val paymentMethod = if (isCreditCardExpense || (isCcTransaction && !isCcBillPayment)) {
+            "Credit Card"
+        } else if (isCcBillPayment) {
+            "Credit Card Bill Payment"
+        } else {
+            detectPaymentMethod(cleanBody)
+        }
 
         // STEP 11: Extract Payee or Merchant
         val payee = extractPayee(cleanBody, transactionType)
@@ -248,7 +275,12 @@ object BankSmsParser {
             time = transTime,
             rawSender = sender,
             rawBody = cleanBody,
-            uniqueHash = uniqueHash
+            uniqueHash = uniqueHash,
+            isCreditCard = isCreditCardExpense || (isCcTransaction && !isCcBillPayment),
+            isCreditCardPayment = isCcBillPayment,
+            isCreditCardRefund = isCcRefund,
+            cardMaskedNumber = cardMaskedNumber,
+            cardName = cardName
         )
 
         return BankSmsParseResult.Success(parsedTransaction)
@@ -365,6 +397,64 @@ object BankSmsParser {
             }
         }
         return "Bank Account"
+    }
+
+    private fun isCreditCardTransaction(body: String): Boolean {
+        val lower = body.lowercase(Locale.ENGLISH)
+        return lower.contains("credit card") ||
+                lower.contains("card ending") ||
+                lower.contains("card ending with") ||
+                lower.contains("card ending in") ||
+                lower.contains("cc ending") ||
+                lower.contains("spent on your card") ||
+                lower.contains("charged to your card") ||
+                lower.contains("credit card purchase") ||
+                lower.contains("credit card transaction") ||
+                lower.contains("cc transaction") ||
+                (lower.contains("card") && (lower.contains("spent") || lower.contains("purchase") || lower.contains("debited")))
+    }
+
+    private fun isCreditCardBillPayment(body: String): Boolean {
+        val lower = body.lowercase(Locale.ENGLISH)
+        return (lower.contains("credit card") || lower.contains("card")) &&
+                (lower.contains("bill payment") ||
+                 lower.contains("payment received") ||
+                 lower.contains("towards your card") ||
+                 lower.contains("towards credit card") ||
+                 lower.contains("towards cc") ||
+                 lower.contains("payment for your card") ||
+                 lower.contains("payment for credit card") ||
+                 lower.contains("paid towards your card") ||
+                 lower.contains("paid towards credit card"))
+    }
+
+    private fun isCreditCardRefund(body: String): Boolean {
+        val lower = body.lowercase(Locale.ENGLISH)
+        return (lower.contains("credit card") || lower.contains("card ending")) &&
+                (lower.contains("refund") || lower.contains("reversal") || lower.contains("cashback"))
+    }
+
+    private fun extractCardMaskedNumber(body: String): String {
+        val patterns = listOf(
+            Pattern.compile("""(?i)(?:credit\s*card|card|ending\s*(?:with|in)?|xx)\s*(?:no\.?|#)?\s*[:\s]*([xX\*\d]{2,16}\d{3,4}|\d{4})"""),
+            Pattern.compile("""(?i)\bcard\s*([xX\*\d]{2,16}\d{4})\b"""),
+            Pattern.compile("""(?i)\b(?:ending|ending\s*in|ending\s*with)\s*(\d{4})\b"""),
+            Pattern.compile("""(?i)\b(?:xx|x{2,})\s*(\d{4})\b""")
+        )
+        for (pattern in patterns) {
+            val matcher = pattern.matcher(body)
+            if (matcher.find()) {
+                val num = matcher.group(1)?.trim()
+                if (!num.isNullOrBlank() && num.any { it.isDigit() }) {
+                    return if (num.startsWith("XX", ignoreCase = true) || num.contains("*")) {
+                        num
+                    } else {
+                        "XX" + num.takeLast(4)
+                    }
+                }
+            }
+        }
+        return ""
     }
 
     private fun detectPaymentMethod(body: String): String {

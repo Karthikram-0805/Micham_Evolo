@@ -117,7 +117,7 @@ fun MainAppContainer(viewModel: MainViewModel) {
 
     Scaffold(
         bottomBar = {
-            if (currentScreen != Screen.Search && currentScreen != Screen.MonthlyTransactions) {
+            if (currentScreen != Screen.Search && currentScreen != Screen.MonthlyTransactions && currentScreen != Screen.CreditCard) {
                 NavigationBar(modifier = Modifier.testTag("bottom_nav_bar")) {
                     NavigationBarItem(
                         selected = currentScreen == Screen.Home,
@@ -181,7 +181,16 @@ fun MainAppContainer(viewModel: MainViewModel) {
                         },
                         onOpenMonthlyTransactions = {
                             currentScreen = Screen.MonthlyTransactions
+                        },
+                        onOpenCreditCard = {
+                            currentScreen = Screen.CreditCard
                         }
+                    )
+                }
+                Screen.CreditCard -> {
+                    CreditCardScreen(
+                        viewModel = viewModel,
+                        onBack = { currentScreen = Screen.Home }
                     )
                 }
                 Screen.Calendar -> {

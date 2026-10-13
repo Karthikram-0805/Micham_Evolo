@@ -16,14 +16,27 @@ import com.example.utils.DateUtils
 import kotlinx.coroutines.flow.Flow
 import java.time.LocalDate
 
+import com.example.data.dao.CreditCardDao
+import com.example.data.entity.CreditCardEntity
+
 class ExpenseRepository(
     private val expenseDao: ExpenseDao,
     private val salaryDao: SalaryDao,
     private val categoryDao: CategoryDao,
     private val incomeDao: IncomeDao,
     private val savingsGoalDao: SavingsGoalDao,
-    private val recurringExpenseDao: RecurringExpenseDao
+    private val recurringExpenseDao: RecurringExpenseDao,
+    private val creditCardDao: CreditCardDao? = null
 ) {
+    // Credit Cards
+    val allCreditCards: Flow<List<CreditCardEntity>> = creditCardDao?.getAllCreditCards() ?: kotlinx.coroutines.flow.emptyFlow()
+
+    suspend fun insertCreditCard(card: CreditCardEntity): Long = creditCardDao?.insertCard(card) ?: 0L
+    suspend fun updateCreditCard(card: CreditCardEntity) { creditCardDao?.updateCard(card) }
+    suspend fun deleteCreditCard(card: CreditCardEntity) { creditCardDao?.deleteCard(card) }
+    suspend fun updateCreditLimit(id: Long, limit: Double) { creditCardDao?.updateCreditLimit(id, limit) }
+    suspend fun getAllCreditCardsSnapshot(): List<CreditCardEntity> = creditCardDao?.getAllCreditCardsSnapshot() ?: emptyList()
+
     // Expenses
     val allExpenses: Flow<List<ExpenseEntity>> = expenseDao.getAllExpenses()
 
@@ -45,13 +58,11 @@ class ExpenseRepository(
     suspend fun reconcileDuplicateTransactions(): Int {
         var duplicatesRemoved = 0
         try {
+            // Deduplicate Expenses
             val allExpenses = expenseDao.getAllExpensesSnapshot()
-            val groupedExpenses = allExpenses.groupBy { 
-                "${it.amount}_${it.date}_${it.paymentMethod}_${it.note.trim()}" 
-            }
-            groupedExpenses.forEach { (_, group) ->
+            val expenseHashGroups = allExpenses.filter { !it.smsHash.isNullOrBlank() }.groupBy { it.smsHash }
+            expenseHashGroups.forEach { (_, group) ->
                 if (group.size > 1) {
-                    // Keep the first (original) record, delete subsequent exact duplicates
                     group.drop(1).forEach { duplicate ->
                         expenseDao.deleteExpenseById(duplicate.id)
                         duplicatesRemoved++
@@ -59,9 +70,34 @@ class ExpenseRepository(
                 }
             }
 
+            val remainingExpenses = expenseDao.getAllExpensesSnapshot()
+            val groupedExpenses = remainingExpenses.groupBy { 
+                "${it.amount}_${it.date}_${it.paymentMethod}_${it.note.trim()}" 
+            }
+            groupedExpenses.forEach { (_, group) ->
+                if (group.size > 1) {
+                    group.drop(1).forEach { duplicate ->
+                        expenseDao.deleteExpenseById(duplicate.id)
+                        duplicatesRemoved++
+                    }
+                }
+            }
+
+            // Deduplicate Incomes / Bank Credits
             val allIncomes = incomeDao.getAllIncomesSnapshot()
-            val groupedIncomes = allIncomes.groupBy {
-                "${it.amount}_${it.date}_${it.incomeType}_${it.note.trim()}"
+            val incomeHashGroups = allIncomes.filter { !it.smsHash.isNullOrBlank() }.groupBy { it.smsHash }
+            incomeHashGroups.forEach { (_, group) ->
+                if (group.size > 1) {
+                    group.drop(1).forEach { duplicate ->
+                        incomeDao.deleteIncomeById(duplicate.id)
+                        duplicatesRemoved++
+                    }
+                }
+            }
+
+            val remainingIncomes = incomeDao.getAllIncomesSnapshot()
+            val groupedIncomes = remainingIncomes.groupBy {
+                "${it.amount}_${it.date}_${it.incomeType}_${it.referenceId}_${it.note.trim()}"
             }
             groupedIncomes.forEach { (_, group) ->
                 if (group.size > 1) {

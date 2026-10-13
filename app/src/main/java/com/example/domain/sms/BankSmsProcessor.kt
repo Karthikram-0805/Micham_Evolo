@@ -69,12 +69,46 @@ object BankSmsProcessor {
         // Check if duplicate in Database
         val db = AppDatabase.getDatabase(context, CoroutineScope(Dispatchers.IO))
         val processedDao = db.processedSmsDao()
+        val incomeDao = db.incomeDao()
+        val expenseDao = db.expenseDao()
 
         val existing = processedDao.getProcessedByHashOrRef(transaction.uniqueHash, "", transaction.referenceId)
         if (existing != null) {
             return@withContext BankSmsProcessResult.Duplicate(
                 "Duplicate skipped: ${transaction.bankName} ₹${transaction.amount} on ${transaction.date}"
             )
+        }
+
+        // Additional uniqueness protection for income and expense
+        if (transaction.type == TransactionType.CREDIT) {
+            val existingInc = incomeDao.getIncomeBySmsHash(transaction.uniqueHash)
+            val countInc = incomeDao.countBySmsIdentity(transaction.uniqueHash, transaction.referenceId, "")
+            if (existingInc != null || countInc > 0) {
+                return@withContext BankSmsProcessResult.Duplicate(
+                    "Duplicate credit skipped: ${transaction.bankName} ₹${transaction.amount} on ${transaction.date}"
+                )
+            }
+        } else {
+            val existingExp = expenseDao.getExpenseBySmsHash(transaction.uniqueHash)
+            if (existingExp != null) {
+                return@withContext BankSmsProcessResult.Duplicate(
+                    "Duplicate debit skipped: ${transaction.bankName} ₹${transaction.amount} on ${transaction.date}"
+                )
+            }
+        }
+
+        // Auto-register card if masked card number is detected
+        if (transaction.cardMaskedNumber.isNotBlank()) {
+            val existingCard = db.creditCardDao().getCardByNumber(transaction.cardMaskedNumber)
+            if (existingCard == null) {
+                val newCard = com.example.data.entity.CreditCardEntity(
+                    cardName = transaction.cardName.ifBlank { "${transaction.bankName} Credit Card ${transaction.cardMaskedNumber}" },
+                    bankName = transaction.bankName,
+                    cardNumberMasked = transaction.cardMaskedNumber,
+                    creditLimit = 0.0
+                )
+                db.creditCardDao().insertCard(newCard)
+            }
         }
 
         // Process Debit (Expense) or Credit (Income)
@@ -97,10 +131,15 @@ object BankSmsProcessor {
                 date = expenseDate,
                 time = expenseTime,
                 paymentMethod = transaction.paymentMethod,
-                note = note
+                note = note,
+                isCreditCard = transaction.isCreditCard,
+                cardName = transaction.cardName,
+                cardMaskedNumber = transaction.cardMaskedNumber,
+                isBillPayment = transaction.isCreditCardPayment,
+                smsHash = transaction.uniqueHash
             )
 
-            val expenseId = db.expenseDao().insertExpense(expense)
+            val expenseId = expenseDao.insertExpense(expense)
 
             // Save in processed_sms with status PENDING_REVIEW so category popup can review this single transaction
             val processedRecord = ProcessedSmsEntity(
@@ -132,9 +171,14 @@ object BankSmsProcessor {
             // Show Toast if enabled
             if (settings.autoSmsNotificationEnabled) {
                 withContext(Dispatchers.Main) {
+                    val toastMessage = if (transaction.isCreditCard) {
+                        "💳 Credit Card SMS: ₹${transaction.amount} spent (${transaction.cardName}). Main balance not affected!"
+                    } else {
+                        "💸 Bank SMS: ₹${transaction.amount} debited (${transaction.bankName}). $reaction"
+                    }
                     Toast.makeText(
                         context.applicationContext,
-                        "💸 Bank SMS: ₹${transaction.amount} debited (${transaction.bankName}). $reaction",
+                        toastMessage,
                         Toast.LENGTH_LONG
                     ).show()
                 }
@@ -151,7 +195,11 @@ object BankSmsProcessor {
         } else {
             // CREDIT -> Add as Income
             val note = buildString {
-                append("Bank SMS Credit: ")
+                if (transaction.isCreditCardRefund) {
+                    append("Credit Card Refund: ")
+                } else {
+                    append("Bank SMS Credit: ")
+                }
                 append(transaction.bankName)
                 append(" (")
                 append(transaction.accountInfo)
@@ -171,12 +219,16 @@ object BankSmsProcessor {
 
             val income = IncomeEntity(
                 amount = transaction.amount,
-                incomeType = "Bank Deposit",
+                incomeType = if (transaction.isCreditCardRefund) "Credit Card Refund" else "Bank Deposit",
                 date = incomeDate,
-                note = note
+                note = note,
+                isCreditCardRefund = transaction.isCreditCardRefund,
+                cardMaskedNumber = transaction.cardMaskedNumber,
+                smsHash = transaction.uniqueHash,
+                referenceId = transaction.referenceId
             )
 
-            val incomeId = db.incomeDao().insertIncome(income)
+            val incomeId = incomeDao.insertIncome(income)
 
             // Save in processed_sms
             val processedRecord = ProcessedSmsEntity(

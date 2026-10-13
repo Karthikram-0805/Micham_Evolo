@@ -8,7 +8,8 @@ import androidx.room.PrimaryKey
     tableName = "expenses",
     indices = [
         Index(value = ["date"]),
-        Index(value = ["categoryId"])
+        Index(value = ["categoryId"]),
+        Index(value = ["smsHash"], unique = true)
     ]
 )
 data class ExpenseEntity(
@@ -19,6 +20,11 @@ data class ExpenseEntity(
     val time: String, // HH:mm
     val paymentMethod: String, // Cash, UPI, Debit Card, Credit Card, Net Banking, Other
     val note: String = "",
+    val isCreditCard: Boolean = false,
+    val cardName: String = "",
+    val cardMaskedNumber: String = "",
+    val isBillPayment: Boolean = false,
+    val smsHash: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 )

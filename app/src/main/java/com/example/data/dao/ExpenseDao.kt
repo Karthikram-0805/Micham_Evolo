@@ -26,13 +26,22 @@ interface ExpenseDao {
     @Query("SELECT * FROM expenses WHERE id = :id LIMIT 1")
     suspend fun getExpenseById(id: Long): ExpenseEntity?
 
+    @Query("SELECT * FROM expenses WHERE smsHash = :smsHash LIMIT 1")
+    suspend fun getExpenseBySmsHash(smsHash: String): ExpenseEntity?
+
+    @Query("SELECT * FROM expenses WHERE isCreditCard = 1 ORDER BY date DESC, time DESC")
+    fun getAllCreditCardExpenses(): Flow<List<ExpenseEntity>>
+
+    @Query("SELECT * FROM expenses WHERE isCreditCard = 1 AND cardMaskedNumber = :masked ORDER BY date DESC, time DESC")
+    fun getExpensesForCard(masked: String): Flow<List<ExpenseEntity>>
+
     @Query("SELECT SUM(amount) FROM expenses WHERE date = :date")
     fun getDailyTotal(date: String): Flow<Double?>
 
     @Query("SELECT SUM(amount) FROM expenses WHERE date >= :startDate AND date <= :endDate")
     fun getTotalBetweenDates(startDate: String, endDate: String): Flow<Double?>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertExpense(expense: ExpenseEntity): Long
 
     @Update
@@ -50,6 +59,6 @@ interface ExpenseDao {
     @Query("SELECT * FROM expenses")
     suspend fun getAllExpensesSnapshot(): List<ExpenseEntity>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAll(expenses: List<ExpenseEntity>)
 }

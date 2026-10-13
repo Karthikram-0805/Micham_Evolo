@@ -48,6 +48,10 @@ import java.math.RoundingMode
 import java.time.YearMonth
 import java.time.ZoneId
 
+import com.example.data.entity.CreditCardEntity
+import com.example.domain.model.CardSpendingDetail
+import com.example.domain.model.CreditCardSummary
+
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val database = AppDatabase.getDatabase(application, viewModelScope)
@@ -57,9 +61,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         categoryDao = database.categoryDao(),
         incomeDao = database.incomeDao(),
         savingsGoalDao = database.savingsGoalDao(),
-        recurringExpenseDao = database.recurringExpenseDao()
+        recurringExpenseDao = database.recurringExpenseDao(),
+        creditCardDao = database.creditCardDao()
     )
     val preferencesRepository = UserPreferencesRepository(application)
+
+    // Credit Cards
+    val allCreditCards: StateFlow<List<CreditCardEntity>> = repository.allCreditCards.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5000),
+        emptyList()
+    )
 
     // User settings flow
     val userSettings: StateFlow<UserSettings> = preferencesRepository.userSettingsFlow.stateIn(
@@ -142,13 +154,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val salaryRecord = salaries.find { it.month == cycle.cycleMonth && it.year == cycle.cycleYear }
         val salaryAmount = BigDecimal(salaryRecord?.salaryAmount ?: settings.defaultSalary).setScale(2, RoundingMode.HALF_UP).toDouble()
 
-        // Incomes in this cycle (Bank credits + manual incomes)
-        val cycleIncomes = incomes.filter { it.date >= cycle.startDate && it.date <= cycle.endDate }
+        // Incomes in this cycle (Bank credits + manual incomes) - exclude credit card refunds from main wallet
+        val cycleIncomes = incomes.filter { it.date >= cycle.startDate && it.date <= cycle.endDate && !it.isCreditCardRefund }
         val totalAdditionalIncome = BigDecimal(cycleIncomes.sumOf { it.amount }).setScale(2, RoundingMode.HALF_UP).toDouble()
         val totalAvailable = BigDecimal(salaryAmount + totalAdditionalIncome).setScale(2, RoundingMode.HALF_UP).toDouble()
 
-        // Expenses in this cycle (Bank debits + manual expenses)
-        val cycleExpenses = expenses.filter { it.date >= cycle.startDate && it.date <= cycle.endDate }
+        // Expenses in this cycle (Bank debits + UPI + cash + actual Credit Card bill payments)
+        // EXCLUDE Credit Card purchases so they NEVER reduce the Main In-Hand Wallet Balance!
+        val cycleExpenses = expenses.filter {
+            it.date >= cycle.startDate && it.date <= cycle.endDate && (!it.isCreditCard || it.isBillPayment)
+        }
         val totalExpenses = BigDecimal(cycleExpenses.sumOf { it.amount }).setScale(2, RoundingMode.HALF_UP).toDouble()
         val remaining = BigDecimal(totalAvailable - totalExpenses).setScale(2, RoundingMode.HALF_UP).toDouble()
 
@@ -199,6 +214,137 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope,
         SharingStarted.WhileSubscribed(5000),
         FinancialSummary()
+    )
+
+    // Dedicated Credit Card Summary & Analytics
+    val creditCardSummary: StateFlow<CreditCardSummary> = combine(
+        allCreditCards,
+        allExpenses,
+        allIncomes,
+        userSettings
+    ) { cards, expenses, incomes, settings ->
+        val cycle = DateUtils.calculateCycle(settings.salaryCycleType, settings.salaryCycleDay)
+
+        // All credit card purchases in current cycle
+        val cycleCcPurchases = expenses.filter {
+            it.isCreditCard && !it.isBillPayment && it.date >= cycle.startDate && it.date <= cycle.endDate
+        }
+        val totalSpendingThisMonth = BigDecimal(cycleCcPurchases.sumOf { it.amount }).setScale(2, RoundingMode.HALF_UP).toDouble()
+
+        // All credit card purchases all-time
+        val allCcPurchases = expenses.filter { it.isCreditCard && !it.isBillPayment }
+        // All payments made towards credit cards (bill payments)
+        val allCcPayments = expenses.filter { it.isBillPayment }
+        // All CC refunds
+        val allCcRefunds = incomes.filter { it.isCreditCardRefund }
+
+        val totalPurchasesAmount = allCcPurchases.sumOf { it.amount }
+        val totalPaymentsAmount = allCcPayments.sumOf { it.amount }
+        val totalRefundsAmount = allCcRefunds.sumOf { it.amount }
+
+        val totalOutstanding = BigDecimal(
+            (totalPurchasesAmount - totalPaymentsAmount - totalRefundsAmount).coerceAtLeast(0.0)
+        ).setScale(2, RoundingMode.HALF_UP).toDouble()
+
+        val paymentsThisMonth = allCcPayments.filter { it.date >= cycle.startDate && it.date <= cycle.endDate }.sumOf { it.amount }
+
+        // Card details list
+        val registeredMasked = cards.map { it.cardNumberMasked }.toSet()
+        val extraCards = allCcPurchases.map { it.cardMaskedNumber to it.cardName }
+            .distinctBy { it.first }
+            .filter { it.first.isNotBlank() && !registeredMasked.contains(it.first) }
+            .map { (masked, name) ->
+                CreditCardEntity(
+                    id = 0,
+                    cardName = name.ifBlank { "Credit Card $masked" },
+                    bankName = name.substringBefore(" ").ifBlank { "Card" },
+                    cardNumberMasked = masked,
+                    creditLimit = 0.0
+                )
+            }
+
+        val allCombinedCards = cards + extraCards
+
+        val cardDetails = allCombinedCards.map { card ->
+            val cardCyclePurchases = cycleCcPurchases.filter {
+                it.cardMaskedNumber == card.cardNumberMasked || (card.cardNumberMasked.isBlank() && it.cardName == card.cardName)
+            }.sumOf { it.amount }
+
+            val cardAllPurchases = allCcPurchases.filter {
+                it.cardMaskedNumber == card.cardNumberMasked || (card.cardNumberMasked.isBlank() && it.cardName == card.cardName)
+            }.sumOf { it.amount }
+
+            val cardPayments = allCcPayments.filter {
+                it.cardMaskedNumber == card.cardNumberMasked
+            }.sumOf { it.amount }
+
+            val cardRefunds = allCcRefunds.filter {
+                it.cardMaskedNumber == card.cardNumberMasked
+            }.sumOf { it.amount }
+
+            val cardOutstanding = BigDecimal((cardAllPurchases - cardPayments - cardRefunds).coerceAtLeast(0.0))
+                .setScale(2, RoundingMode.HALF_UP).toDouble()
+
+            val availLimit = if (card.creditLimit > 0) {
+                BigDecimal((card.creditLimit - cardOutstanding).coerceAtLeast(0.0)).setScale(2, RoundingMode.HALF_UP).toDouble()
+            } else 0.0
+
+            val utilPercent = if (card.creditLimit > 0) {
+                ((cardOutstanding / card.creditLimit) * 100).toInt().coerceIn(0, 100)
+            } else 0
+
+            CardSpendingDetail(
+                card = card,
+                totalSpentThisMonth = cardCyclePurchases,
+                currentOutstanding = cardOutstanding,
+                paymentsMadeThisMonth = allCcPayments.filter {
+                    it.cardMaskedNumber == card.cardNumberMasked && it.date >= cycle.startDate && it.date <= cycle.endDate
+                }.sumOf { it.amount },
+                availableLimit = availLimit,
+                utilizationPercentage = utilPercent
+            )
+        }
+
+        val totalAvailableLimit = cardDetails.sumOf { it.availableLimit }
+
+        // Monthly Daily Spends for graph
+        val dailyMap = mutableMapOf<String, Double>()
+        try {
+            val startLd = LocalDate.parse(cycle.startDate)
+            val endLd = LocalDate.parse(cycle.endDate)
+            var cur = startLd
+            while (!cur.isAfter(endLd)) {
+                dailyMap[cur.toString()] = 0.0
+                cur = cur.plusDays(1)
+            }
+        } catch (e: Exception) {
+            // fallback
+        }
+        cycleCcPurchases.forEach {
+            dailyMap[it.date] = (dailyMap[it.date] ?: 0.0) + it.amount
+        }
+        val dailySpends = dailyMap.map { (dt, amt) ->
+            DailySpendItem(
+                date = dt,
+                totalAmount = amt,
+                transactionCount = cycleCcPurchases.count { it.date == dt }
+            )
+        }.sortedBy { it.date }
+
+        CreditCardSummary(
+            totalSpendingThisMonth = totalSpendingThisMonth,
+            totalOutstanding = totalOutstanding,
+            totalPaymentsMade = paymentsThisMonth,
+            totalAvailableLimit = totalAvailableLimit,
+            cards = cardDetails,
+            monthlyDailySpends = dailySpends,
+            recentTransactions = (allCcPurchases + allCcPayments).sortedByDescending { it.date },
+            recentRefunds = allCcRefunds.sortedByDescending { it.date }
+        )
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5000),
+        CreditCardSummary()
     )
 
     // Categories with spend for current cycle
@@ -345,7 +491,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         date: String,
         time: String,
         paymentMethod: String,
-        note: String
+        note: String,
+        isCreditCard: Boolean = paymentMethod.equals("Credit Card", ignoreCase = true),
+        cardName: String = "",
+        cardMaskedNumber: String = "",
+        isBillPayment: Boolean = false
     ) {
         viewModelScope.launch(Dispatchers.IO) {
             val expense = ExpenseEntity(
@@ -354,7 +504,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 date = date,
                 time = time,
                 paymentMethod = paymentMethod,
-                note = note.trim()
+                note = note.trim(),
+                isCreditCard = isCreditCard,
+                cardName = cardName,
+                cardMaskedNumber = cardMaskedNumber,
+                isBillPayment = isBillPayment
             )
             repository.insertExpense(expense)
 
@@ -380,9 +534,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         date: String,
         time: String,
         paymentMethod: String,
-        note: String
+        note: String,
+        isCreditCard: Boolean? = null,
+        cardName: String? = null,
+        cardMaskedNumber: String? = null,
+        isBillPayment: Boolean? = null
     ) {
         viewModelScope.launch(Dispatchers.IO) {
+            val existing = repository.getExpenseById(id)
+            val isCc = isCreditCard ?: (paymentMethod.equals("Credit Card", ignoreCase = true) || (existing?.isCreditCard == true))
+            val cName = cardName ?: (existing?.cardName ?: "")
+            val cMasked = cardMaskedNumber ?: (existing?.cardMaskedNumber ?: "")
+            val isBill = isBillPayment ?: (existing?.isBillPayment ?: false)
+
             val expense = ExpenseEntity(
                 id = id,
                 amount = amount,
@@ -391,9 +555,104 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 time = time,
                 paymentMethod = paymentMethod,
                 note = note.trim(),
+                isCreditCard = isCc,
+                cardName = cName,
+                cardMaskedNumber = cMasked,
+                isBillPayment = isBill,
+                smsHash = existing?.smsHash,
+                createdAt = existing?.createdAt ?: System.currentTimeMillis(),
                 updatedAt = System.currentTimeMillis()
             )
             repository.updateExpense(expense)
+        }
+    }
+
+    // Credit Card Operations
+    fun addCreditCard(
+        cardName: String,
+        bankName: String,
+        cardNumberMasked: String,
+        creditLimit: Double,
+        colorHex: String = "#3B82F6"
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val masked = if (cardNumberMasked.startsWith("XX", ignoreCase = true)) {
+                cardNumberMasked
+            } else if (cardNumberMasked.isNotBlank()) {
+                "XX" + cardNumberMasked.takeLast(4)
+            } else "XX0000"
+
+            val card = CreditCardEntity(
+                cardName = cardName.trim().ifBlank { "${bankName.trim()} Credit Card $masked" },
+                bankName = bankName.trim().ifBlank { "Bank" },
+                cardNumberMasked = masked,
+                creditLimit = creditLimit,
+                colorHex = colorHex
+            )
+            repository.insertCreditCard(card)
+        }
+    }
+
+    fun updateCreditLimit(cardId: Long, limit: Double) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.updateCreditLimit(cardId, limit)
+        }
+    }
+
+    fun deleteCreditCard(card: CreditCardEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.deleteCreditCard(card)
+        }
+    }
+
+    fun addManualCreditCardExpense(
+        amount: Double,
+        cardName: String,
+        cardMaskedNumber: String,
+        categoryId: Long,
+        date: String,
+        time: String = DateUtils.nowTime(),
+        note: String
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val expense = ExpenseEntity(
+                amount = amount,
+                categoryId = categoryId,
+                date = date.ifBlank { DateUtils.today() },
+                time = time.ifBlank { DateUtils.nowTime() },
+                paymentMethod = "Credit Card",
+                note = note.ifBlank { "Credit Card Purchase" },
+                isCreditCard = true,
+                cardName = cardName,
+                cardMaskedNumber = cardMaskedNumber,
+                isBillPayment = false
+            )
+            repository.insertExpense(expense)
+        }
+    }
+
+    fun recordCreditCardBillPayment(
+        amount: Double,
+        cardMaskedNumber: String,
+        cardName: String,
+        date: String = DateUtils.today(),
+        note: String = "Credit Card Bill Payment"
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val billsCatId = categories.value.find { it.name.equals("Bills", ignoreCase = true) }?.id ?: 1L
+            val expense = ExpenseEntity(
+                amount = amount,
+                categoryId = billsCatId,
+                date = date.ifBlank { DateUtils.today() },
+                time = DateUtils.nowTime(),
+                paymentMethod = "Bank Account",
+                note = if (note.isNotBlank()) note else "Credit Card Bill Payment: $cardName ($cardMaskedNumber)",
+                isCreditCard = false,
+                cardName = cardName,
+                cardMaskedNumber = cardMaskedNumber,
+                isBillPayment = true
+            )
+            repository.insertExpense(expense)
         }
     }
 
@@ -834,15 +1093,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val transactionId = if (existing != null && existing.associatedId > 0L) {
                 existing.associatedId
             } else {
+                // Auto-register card if masked card number is detected
+                if (tx.cardMaskedNumber.isNotBlank()) {
+                    val existingCard = database.creditCardDao().getCardByNumber(tx.cardMaskedNumber)
+                    if (existingCard == null) {
+                        val newCard = CreditCardEntity(
+                            cardName = tx.cardName.ifBlank { "${tx.bankName} Credit Card ${tx.cardMaskedNumber}" },
+                            bankName = tx.bankName,
+                            cardNumberMasked = tx.cardMaskedNumber,
+                            creditLimit = 0.0
+                        )
+                        database.creditCardDao().insertCard(newCard)
+                    }
+                }
+
                 // Create single transaction record in DB
                 if (tx.type == TransactionType.DEBIT) {
+                    val existingExp = database.expenseDao().getExpenseBySmsHash(tx.uniqueHash)
+                    if (existingExp != null) {
+                        withContext(Dispatchers.Main) {
+                            onResult("Already processed! This debit transaction was already recorded.")
+                        }
+                        return@launch
+                    }
+
                     val exp = ExpenseEntity(
                         amount = tx.amount,
                         categoryId = catId,
                         date = expenseDate,
                         time = expenseTime,
                         paymentMethod = tx.paymentMethod,
-                        note = note
+                        note = note,
+                        isCreditCard = tx.isCreditCard,
+                        cardName = tx.cardName,
+                        cardMaskedNumber = tx.cardMaskedNumber,
+                        isBillPayment = tx.isCreditCardPayment,
+                        smsHash = tx.uniqueHash
                     )
                     val id = repository.insertExpense(exp)
                     val record = ProcessedSmsEntity(
@@ -866,11 +1152,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     database.processedSmsDao().insert(record)
                     id
                 } else {
+                    // Check duplicate at income level
+                    val existingInc = database.incomeDao().getIncomeBySmsHash(tx.uniqueHash)
+                    val countInc = database.incomeDao().countBySmsIdentity(tx.uniqueHash, tx.referenceId, "")
+                    if (existingInc != null || countInc > 0) {
+                        withContext(Dispatchers.Main) {
+                            onResult("Already processed! This credit transaction was already recorded.")
+                        }
+                        return@launch
+                    }
+
                     val inc = IncomeEntity(
                         amount = tx.amount,
-                        incomeType = "Bank Deposit",
+                        incomeType = if (tx.isCreditCardRefund) "Credit Card Refund" else "Bank Deposit",
                         date = expenseDate,
-                        note = note
+                        note = note,
+                        isCreditCardRefund = tx.isCreditCardRefund,
+                        cardMaskedNumber = tx.cardMaskedNumber,
+                        smsHash = tx.uniqueHash,
+                        referenceId = tx.referenceId
                     )
                     val id = repository.insertIncome(inc)
                     val record = ProcessedSmsEntity(
@@ -914,7 +1214,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     timestamp = timestamp,
                     uniqueHash = tx.uniqueHash,
                     defaultDescription = desc,
-                    suggestedCategoryId = catId
+                    suggestedCategoryId = catId,
+                    isCreditCard = tx.isCreditCard,
+                    cardMaskedNumber = tx.cardMaskedNumber,
+                    cardName = tx.cardName
                 )
 
                 withContext(Dispatchers.Main) {
@@ -923,11 +1226,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         current.add(detectedItem)
                         _pendingSmsTransactions.value = current
                     }
-                    onResult("Detected ₹${CurrencyFormatter.format(tx.amount)}! Please review and confirm category.")
+                    val msg = if (tx.isCreditCard) {
+                        "💳 Credit Card ₹${CurrencyFormatter.format(tx.amount)} detected! (Will NOT deduct from Main Wallet). Please confirm category."
+                    } else {
+                        "Detected ₹${CurrencyFormatter.format(tx.amount)}! Please review and confirm category."
+                    }
+                    onResult(msg)
                 }
             } else {
                 withContext(Dispatchers.Main) {
-                    onResult("Credit of ₹${CurrencyFormatter.format(tx.amount)} added to wallet balance successfully!")
+                    val msg = if (tx.isCreditCardRefund) {
+                        "Credit Card Refund of ₹${CurrencyFormatter.format(tx.amount)} recorded! CC Outstanding reduced."
+                    } else {
+                        "Credit of ₹${CurrencyFormatter.format(tx.amount)} added to wallet balance successfully!"
+                    }
+                    onResult(msg)
                 }
             }
         }

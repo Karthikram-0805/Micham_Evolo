@@ -28,5 +28,10 @@ data class ParsedBankTransaction(
     val time: String, // HH:mm
     val rawSender: String,
     val rawBody: String,
-    val uniqueHash: String
+    val uniqueHash: String,
+    val isCreditCard: Boolean = false,
+    val isCreditCardPayment: Boolean = false,
+    val isCreditCardRefund: Boolean = false,
+    val cardMaskedNumber: String = "",
+    val cardName: String = ""
 )

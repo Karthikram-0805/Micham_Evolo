@@ -10,4 +10,5 @@ sealed class Screen(val route: String) {
     object Search : Screen("search")
     object SmsSync : Screen("sms_sync")
     object MonthlyTransactions : Screen("monthly_transactions")
+    object CreditCard : Screen("credit_card")
 }

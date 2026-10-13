@@ -33,7 +33,10 @@ data class DetectedSmsItem(
     val timestamp: Long,
     val uniqueHash: String,
     val defaultDescription: String,
-    val suggestedCategoryId: Long
+    val suggestedCategoryId: Long,
+    val isCreditCard: Boolean = false,
+    val cardMaskedNumber: String = "",
+    val cardName: String = ""
 )
 
 data class SmsScanSummary(
@@ -161,14 +164,37 @@ object SmsInboxHelper {
                                             timestamp = dateMillis,
                                             uniqueHash = tx.uniqueHash,
                                             defaultDescription = existing.description.ifEmpty { BankSmsProcessor.suggestDefaultDescription(tx) },
-                                            suggestedCategoryId = catId
+                                            suggestedCategoryId = catId,
+                                            isCreditCard = tx.isCreditCard,
+                                            cardMaskedNumber = tx.cardMaskedNumber,
+                                            cardName = tx.cardName
                                         )
                                     )
                                 }
                                 // If CONFIRMED, SKIPPED, or DELETED, do nothing (skip duplicate)
                             } else {
+                                // Auto-register card if masked card number is detected
+                                if (tx.cardMaskedNumber.isNotBlank()) {
+                                    val existingCard = db.creditCardDao().getCardByNumber(tx.cardMaskedNumber)
+                                    if (existingCard == null) {
+                                        val newCard = com.example.data.entity.CreditCardEntity(
+                                            cardName = tx.cardName.ifBlank { "${tx.bankName} Credit Card ${tx.cardMaskedNumber}" },
+                                            bankName = tx.bankName,
+                                            cardNumberMasked = tx.cardMaskedNumber,
+                                            creditLimit = 0.0
+                                        )
+                                        db.creditCardDao().insertCard(newCard)
+                                    }
+                                }
+
                                 // Brand new SMS detected! Create ONE transaction record immediately
                                 if (tx.type == TransactionType.DEBIT) {
+                                    // Check uniqueness at expense level too
+                                    val existingExp = db.expenseDao().getExpenseBySmsHash(tx.uniqueHash)
+                                    if (existingExp != null) {
+                                        continue
+                                    }
+
                                     val catId = BankSmsProcessor.matchCategoryForTransaction(tx, categories)
                                     val desc = BankSmsProcessor.suggestDefaultDescription(tx)
                                     val note = BankSmsProcessor.buildNote(tx)
@@ -182,7 +208,12 @@ object SmsInboxHelper {
                                         date = expenseDate,
                                         time = expenseTime,
                                         paymentMethod = tx.paymentMethod,
-                                        note = note
+                                        note = note,
+                                        isCreditCard = tx.isCreditCard,
+                                        cardName = tx.cardName,
+                                        cardMaskedNumber = tx.cardMaskedNumber,
+                                        isBillPayment = tx.isCreditCardPayment,
+                                        smsHash = tx.uniqueHash
                                     )
                                     val expenseId = db.expenseDao().insertExpense(expense)
 
@@ -226,19 +257,35 @@ object SmsInboxHelper {
                                             timestamp = dateMillis,
                                             uniqueHash = tx.uniqueHash,
                                             defaultDescription = desc,
-                                            suggestedCategoryId = catId
+                                            suggestedCategoryId = catId,
+                                            isCreditCard = tx.isCreditCard,
+                                            cardMaskedNumber = tx.cardMaskedNumber,
+                                            cardName = tx.cardName
                                         )
                                     )
                                 } else {
+                                    // Bank Credit: check duplicate at income level
+                                    val existingInc = db.incomeDao().getIncomeBySmsHash(tx.uniqueHash)
+                                    val countInc = db.incomeDao().countBySmsIdentity(tx.uniqueHash, tx.referenceId, smsId)
+                                    if (existingInc != null || countInc > 0) {
+                                        continue
+                                    }
+
                                     // Bank Credit: add directly as Income without popup (as per requirements)
                                     val incomeDate = if (tx.date.isNotBlank() && tx.date >= "2026-01-01") tx.date else DateUtils.today()
-                                    val incomeNote = "Bank SMS Credit: ${tx.bankName} (${tx.accountInfo})" +
+                                    val incomeNote = (if (tx.isCreditCardRefund) "Credit Card Refund: " else "Bank SMS Credit: ") +
+                                        "${tx.bankName} (${tx.accountInfo})" +
                                         if (tx.referenceId.isNotBlank()) " [Ref: ${tx.referenceId}]" else ""
                                     val income = IncomeEntity(
                                         amount = tx.amount,
-                                        incomeType = "Bank Deposit",
+                                        incomeType = if (tx.isCreditCardRefund) "Credit Card Refund" else "Bank Deposit",
                                         date = incomeDate,
-                                        note = incomeNote
+                                        note = incomeNote,
+                                        isCreditCardRefund = tx.isCreditCardRefund,
+                                        cardMaskedNumber = tx.cardMaskedNumber,
+                                        smsHash = tx.uniqueHash,
+                                        smsId = smsId,
+                                        referenceId = tx.referenceId
                                     )
                                     val incomeId = db.incomeDao().insertIncome(income)
 

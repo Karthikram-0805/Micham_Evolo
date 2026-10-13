@@ -24,8 +24,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddCard
+import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Search
@@ -68,6 +70,7 @@ import com.example.ui.theme.IncomeGreen
 import com.example.ui.theme.SpentRed
 import com.example.ui.theme.WarningOrange
 import com.example.ui.viewmodel.MainViewModel
+import com.example.utils.CurrencyFormatter
 
 @Composable
 fun HomeScreen(
@@ -77,9 +80,11 @@ fun HomeScreen(
     onOpenSearch: () -> Unit,
     onOpenSmsSync: () -> Unit,
     onEditExpense: (ExpenseEntity) -> Unit,
-    onOpenMonthlyTransactions: () -> Unit = {}
+    onOpenMonthlyTransactions: () -> Unit = {},
+    onOpenCreditCard: () -> Unit = {}
 ) {
     val summary by viewModel.financialSummary.collectAsState()
+    val ccSummary by viewModel.creditCardSummary.collectAsState()
     val settings by viewModel.userSettings.collectAsState()
     val allExpenses by viewModel.allExpenses.collectAsState()
     val allIncomes by viewModel.allIncomes.collectAsState()
@@ -161,6 +166,16 @@ fun HomeScreen(
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(
+                            onClick = onOpenCreditCard,
+                            modifier = Modifier.testTag("home_credit_card_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CreditCard,
+                                contentDescription = "Credit Cards",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        IconButton(
                             onClick = onOpenSmsSync,
                             modifier = Modifier.testTag("home_sms_sync_button")
                         ) {
@@ -232,6 +247,102 @@ fun HomeScreen(
                     isRoastMode = settings.reactionIntensity == "ROAST",
                     onOpenMonthlyTransactions = onOpenMonthlyTransactions
                 )
+            }
+
+            // Dedicated Credit Card Option on Dashboard
+            item {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpenCreditCard() }
+                        .testTag("home_credit_card_dashboard_card")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                modifier = Modifier.size(42.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.CreditCard,
+                                        contentDescription = "Credit Cards",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "Credit Card Expenses 💳",
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.titleSmall
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = if (ccSummary.totalOutstanding > 0) SpentRed else IncomeGreen
+                                    ) {
+                                        Text(
+                                            text = if (ccSummary.totalOutstanding > 0) "DUE" else "SETTLED",
+                                            color = Color.White,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Black,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                            fontSize = 9.sp
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = if (ccSummary.cards.isNotEmpty()) {
+                                        "${ccSummary.cards.size} Cards • Outstanding: ${CurrencyFormatter.formatIndian(ccSummary.totalOutstanding, settings.currencySymbol)}"
+                                    } else {
+                                        "Track card spends separately • Won't affect wallet"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(
+                                    text = CurrencyFormatter.formatIndian(ccSummary.totalSpendingThisMonth, settings.currencySymbol),
+                                    fontWeight = FontWeight.Black,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = SpentRed
+                                )
+                                Text(
+                                    text = "This Month",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.outline
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
             }
 
             // Interactive Monthly and Yearly Financial Analytics Line Graph (Excel visual reference)
